@@ -34,8 +34,7 @@ References:
 class AEVBState(NamedTuple):
     rec_params: ArrayLikeTree
     gen_params: ArrayLikeTree
-    rec_opt_state: OptState
-    gen_opt_state: OptState
+    opt_state: OptState
 
 
 class AEVBInfo(NamedTuple):
@@ -119,11 +118,10 @@ def tractable_kl_step(
         tuple[AEVBState, AEVBInfo]: _description_
     """
     rec_params, gen_params = aevb_state.rec_params, aevb_state.gen_params
-    params = (rec_params, gen_params)
 
-    def loss_fn(params) -> float:
-        rec_params, gen_params = params
-
+    def loss_fn(
+        rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
+    ) -> tuple[float, tuple[float, float]]:
         # Compute the predicted parameters for z using the recognition model
         # and input x.
         pred_z_mu, pred_z_sigma = rec_apply_fn(rec_params, x)
@@ -141,42 +139,22 @@ def tractable_kl_step(
         loss = (nll + kl).mean()
         return loss, (nll, kl)
 
-    loss_grad_fn = jax.value_and_grad(loss_fn)(params)
+    loss_grad_fn = jax.value_and_grad(loss_fn, argnums=(0, 1))
+    (loss_val, (nll, kl)), (rec_grad, gen_grad) = loss_grad_fn(rec_params, gen_params)
 
-    (loss_val, (nll, kl)), loss_grad = loss_grad_fn(params)
-
-    # Update recognition model parameters
-    rec_updates, new_rec_opt_state = optimizer.update(
-        loss_grad,
-        aevb_state.rec_opt_state,
-        rec_params,
+    # Updating parameters using gradient information.
+    (rec_updates, gen_updates), new_opt_state = optimizer.update(
+        (rec_grad, gen_grad),
+        aevb_state.opt_state,
+        (rec_params, gen_params),
     )
+
     new_rec_params = optax.apply_updates(rec_params, rec_updates)
-
-    # Update generative model parameters
-    gen_updates, new_gen_opt_state = optimizer.update(
-        loss_grad,
-        aevb_state.gen_opt_state,
-        gen_params,
-    )
     new_gen_params = optax.apply_updates(gen_params, gen_updates)
 
     new_aevb_state = AEVBState(
         new_rec_params,
         new_gen_params,
-        new_rec_opt_state,
-        new_gen_opt_state,
+        new_opt_state,
     )
-
     return new_aevb_state, AEVBInfo(loss_val, nll, kl)
-
-
-## NOTE: recognition model must prediction a mu and sigma from a data point x.
-## NOTE: generative model must predict x from a sample z
-
-
-# def reparameterized_sample_loc_scale(
-#     rng_key: PRNGKey, params: tuple[ArrayLikeTree, ArrayLikeTree], n_samples: int
-# ) -> ArrayTree:
-#     loc, scale = params.loc, params.scale
-#     return _reparameterized_sample_loc_scale(rng_key, loc, scale, n_samples)
