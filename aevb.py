@@ -1,14 +1,16 @@
 from typing import Union, Iterable, Mapping, Any, Callable, NamedTuple
 from jax.typing import ArrayLike
-
+from attrs import define
 import jax
 import jax.numpy as jnp
 from jax.random import PRNGKey
 import optax
 from optax import GradientTransformation, OptState
+from functools import partial as bind
 
 Array = jnp.array
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
+
 
 """
 This is ported from https://github.com/blackjax-devs/blackjax/blob/main/blackjax/types.py
@@ -30,6 +32,10 @@ References:
     [1] "Auto-Encoding Variational Bayes" (Kingma & Welling, 2013)
 """
 
+# TODO:
+# - how to ensure recognition model will produce z that
+# the generative model can ingest.
+
 
 class AEVBState(NamedTuple):
     rec_params: ArrayLikeTree
@@ -41,6 +47,15 @@ class AEVBInfo(NamedTuple):
     loss: float
     nll: float
     kl: float
+
+
+def init(
+    rec_params: ArrayLikeTree,
+    gen_params: ArrayLikeTree,
+    optimizer: GradientTransformation,
+) -> AEVBState:
+    opt_state = optimizer.init((rec_params, gen_params))
+    return AEVBState(rec_params, gen_params, opt_state)
 
 
 # Useful PyTree Utility: modified from https://github.com/google-research/google-research/blob/master/bnn_hmc/utils/tree_utils.py
@@ -97,9 +112,9 @@ def unit_normal_kl(mu, sigma):
 def tractable_kl_step(
     rng_key: PRNGKey,
     aevb_state: AEVBState,
+    x: ArrayLike,
     rec_apply_fn: Callable,
     gen_apply_fn: Callable,
-    x: ArrayLike,
     optimizer: GradientTransformation,
     n_samples: int,
 ) -> tuple[AEVBState, AEVBInfo]:
@@ -122,39 +137,68 @@ def tractable_kl_step(
     def loss_fn(
         rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
     ) -> tuple[float, tuple[float, float]]:
-        # Compute the predicted parameters for z using the recognition model
-        # and input x.
         pred_z_mu, pred_z_sigma = rec_apply_fn(rec_params, x)
-        # Sample a z using its predicted parameters.
         z = reparameterized_sample_loc_scale(
             rng_key, pred_z_mu, pred_z_sigma, n_samples
         )
 
-        # Compute the KL penalty between the prior over z (unit gaussian) and current
-        # recognition model posterior.
         kl = unit_normal_kl(pred_z_mu, pred_z_sigma)
-        # Compute negative log likelihood of the observed data under the generative model.
         nll = -normal_loglikelihood_fn(gen_apply_fn, gen_params, z, x)
-
         loss = (nll + kl).mean()
         return loss, (nll, kl)
 
-    loss_grad_fn = jax.value_and_grad(loss_fn, argnums=(0, 1))
+    loss_grad_fn = jax.value_and_grad(loss_fn, has_aux=True, argnums=(0, 1))
     (loss_val, (nll, kl)), (rec_grad, gen_grad) = loss_grad_fn(rec_params, gen_params)
 
-    # Updating parameters using gradient information.
     (rec_updates, gen_updates), new_opt_state = optimizer.update(
         (rec_grad, gen_grad),
         aevb_state.opt_state,
         (rec_params, gen_params),
     )
-
     new_rec_params = optax.apply_updates(rec_params, rec_updates)
     new_gen_params = optax.apply_updates(gen_params, gen_updates)
-
     new_aevb_state = AEVBState(
         new_rec_params,
         new_gen_params,
         new_opt_state,
     )
     return new_aevb_state, AEVBInfo(loss_val, nll, kl)
+
+
+def _sample(gen_params: ArrayLikeTree, gen_apply_fn: Callable):
+    ...
+
+
+class InferenceAlgorithm(NamedTuple):
+    init: Callable
+    step: Callable
+    sample: Callable
+
+
+# INTERFACE -------------------------------
+@define
+class AEVB:
+    _init_fn = staticmethod(init)
+    _step_fn = staticmethod(tractable_kl_step)
+    # TODO: sample_fn: Callable[[int], ArrayLike]
+    # given a number of samples, sample from generative model.
+    # using z = N(0,1)
+
+    @classmethod
+    def init(
+        cls,
+        recognition_apply: Callable[[ArrayLikeTree, ArrayLike], ArrayLikeTree],
+        generative_apply: Callable[[ArrayLikeTree, ArrayLike], ArrayLike],
+        optimizer: GradientTransformation,
+        n_samples: int,
+    ):
+        init_fn = bind(cls._init_fn, optimizer=optimizer)
+        step_fn = bind(
+            cls._step_fn,
+            rec_apply_fn=recognition_apply,
+            gen_apply_fn=generative_apply,
+            optimizer=optimizer,
+            n_samples=n_samples,
+        )
+        sample_fn = None  # FOR NOW
+        return InferenceAlgorithm(init_fn, step_fn, sample_fn)
