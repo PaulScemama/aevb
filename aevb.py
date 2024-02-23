@@ -138,13 +138,14 @@ def tractable_kl_step(
         rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
     ) -> tuple[float, tuple[float, float]]:
         pred_z_mu, pred_z_sigma = rec_apply_fn(rec_params, x)
-        z = reparameterized_sample_loc_scale(
+        z_samples = reparameterized_sample_loc_scale(
             rng_key, pred_z_mu, pred_z_sigma, n_samples
         )
+        z = z_samples.mean(axis=0)
 
-        kl = unit_normal_kl(pred_z_mu, pred_z_sigma)
-        nll = -normal_loglikelihood_fn(gen_apply_fn, gen_params, z, x)
-        loss = (nll + kl).mean()
+        kl = unit_normal_kl(pred_z_mu, pred_z_sigma).mean()
+        nll = -normal_loglikelihood_fn(gen_apply_fn, gen_params, z, x).sum()
+        loss = nll + kl
         return loss, (nll, kl)
 
     loss_grad_fn = jax.value_and_grad(loss_fn, has_aux=True, argnums=(0, 1))
@@ -165,8 +166,10 @@ def tractable_kl_step(
     return new_aevb_state, AEVBInfo(loss_val, nll, kl)
 
 
-def _sample(gen_params: ArrayLikeTree, gen_apply_fn: Callable):
-    ...
+def _sample(gen_params: ArrayLikeTree, gen_apply_fn: Callable, n_samples: int): ...
+
+
+# need to figure out what shape z is
 
 
 class InferenceAlgorithm(NamedTuple):
