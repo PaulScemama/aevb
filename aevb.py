@@ -25,7 +25,8 @@ ArrayLikeTree = Union[
     ArrayLike, Iterable["ArrayLikeTree"], Mapping[Any, "ArrayLikeTree"]
 ]
 """-------------------------------------------------------------------------------"""
-
+# Useful PyTree Utility: modified from https://github.com/google-research/google-research/blob/master/bnn_hmc/utils/tree_utils.py
+# to allow for `n_samples`` to be taken.
 """
 References:
 
@@ -58,8 +59,6 @@ def init(
     return AEVBState(rec_params, gen_params, opt_state)
 
 
-# Useful PyTree Utility: modified from https://github.com/google-research/google-research/blob/master/bnn_hmc/utils/tree_utils.py
-# to allow for `n_samples`` to be taken.
 def normal_like_tree(
     rng_key: PRNGKey, tree: ArrayLikeTree, n_samples: int
 ) -> ArrayTree:
