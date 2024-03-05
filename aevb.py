@@ -1,16 +1,16 @@
 from typing import Union, Iterable, Mapping, Any, Callable, NamedTuple
 from jax.typing import ArrayLike
-from attrs import define
 import jax
+from jax import jit
 import jax.numpy as jnp
-from jax.random import PRNGKey
+from jax.random import PRNGKey, split
 import optax
 from optax import GradientTransformation, OptState
-from functools import partial as bind
+import flax.linen as nn
+from functools import partial
 
 Array = jnp.array
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
-
 
 """
 This is ported from https://github.com/blackjax-devs/blackjax/blob/main/blackjax/types.py
@@ -110,7 +110,9 @@ def unit_normal_kl(mu, sigma):
 
 def tractable_kl_step(
     rng_key: PRNGKey,
-    aevb_state: AEVBState,
+    rec_params,
+    gen_params,
+    opt_state,
     x: ArrayLike,
     rec_apply_fn: Callable,
     gen_apply_fn: Callable,
@@ -131,7 +133,6 @@ def tractable_kl_step(
     Returns:
         tuple[AEVBState, AEVBInfo]: _description_
     """
-    rec_params, gen_params = aevb_state.rec_params, aevb_state.gen_params
 
     def loss_fn(
         rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
@@ -152,7 +153,7 @@ def tractable_kl_step(
 
     (rec_updates, gen_updates), new_opt_state = optimizer.update(
         (rec_grad, gen_grad),
-        aevb_state.opt_state,
+        opt_state,
         (rec_params, gen_params),
     )
     new_rec_params = optax.apply_updates(rec_params, rec_updates)
@@ -165,42 +166,81 @@ def tractable_kl_step(
     return new_aevb_state, AEVBInfo(loss_val, nll, kl)
 
 
-def _sample(gen_params: ArrayLikeTree, gen_apply_fn: Callable, n_samples: int): ...
+def sample_data(
+    rng_key: PRNGKey,
+    gen_params: ArrayLikeTree,
+    gen_apply_fn: Callable,
+    n_samples: int,
+    latent_dim: int,
+):
+    z = jax.random.normal(rng_key, shape=(n_samples, latent_dim))
+    x = gen_apply_fn(gen_params, z)
+    return x
 
 
-# need to figure out what shape z is
-
-
-class InferenceAlgorithm(NamedTuple):
+class AEVBAlgorithm(NamedTuple):
+    recognition_model: nn.Module
+    generative_model: nn.Module
     init: Callable
     step: Callable
-    sample: Callable
+    sample_data: Callable
 
 
 # INTERFACE -------------------------------
-@define
-class AEVB:
-    _init_fn = staticmethod(init)
-    _step_fn = staticmethod(tractable_kl_step)
-    # TODO: sample_fn: Callable[[int], ArrayLike]
-    # given a number of samples, sample from generative model.
-    # using z = N(0,1)
+class RecognitionModel(nn.Module):
 
-    @classmethod
-    def init(
-        cls,
-        recognition_apply: Callable[[ArrayLikeTree, ArrayLike], ArrayLikeTree],
-        generative_apply: Callable[[ArrayLikeTree, ArrayLike], ArrayLike],
-        optimizer: GradientTransformation,
-        n_samples: int,
-    ):
-        init_fn = bind(cls._init_fn, optimizer=optimizer)
-        step_fn = bind(
-            cls._step_fn,
-            rec_apply_fn=recognition_apply,
-            gen_apply_fn=generative_apply,
-            optimizer=optimizer,
-            n_samples=n_samples,
+    latent_dim: int
+    feature_extractor: nn.Module
+
+    @nn.compact
+    def __call__(self, x):
+
+        x = self.feature_extractor(x)
+        # Project to mu, log variance
+        z_mu = nn.Dense(features=self.latent_dim)(x)
+        z_logvar = nn.Dense(features=self.latent_dim)(x)
+        z_sigma = jnp.exp(z_logvar * 0.5)
+
+        return z_mu, z_sigma
+
+
+def construct_aevb(
+    latent_dim: int,
+    recognition_feature_extractor: Callable[[ArrayLikeTree, ArrayLike], ArrayLikeTree],
+    generative_model: Callable[[ArrayLikeTree, ArrayLike], ArrayLike],
+    optimizer: GradientTransformation,
+    n_samples: int,
+) -> AEVBAlgorithm:
+    recognition_model: nn.Module = RecognitionModel(
+        latent_dim, recognition_feature_extractor
+    )
+
+    def init_fn(rng_key: PRNGKey, data_shape: tuple) -> AEVBState:
+        rec_init_key, gen_init_key = split(rng_key)
+        rec_params = recognition_model.init(rec_init_key, jnp.ones(data_shape))
+        gen_params = generative_model.init(gen_init_key, jnp.ones(latent_dim))
+        return init(rec_params, gen_params, optimizer)
+
+    @jit
+    def step_fn(rng_key, state, x) -> tuple[AEVBState, AEVBInfo]:
+        return tractable_kl_step(
+            rng_key,
+            state.rec_params,
+            state.gen_params,
+            state.opt_state,
+            x,
+            recognition_model.apply,
+            generative_model.apply,
+            optimizer,
+            n_samples,
         )
-        sample_fn = None  # FOR NOW
-        return InferenceAlgorithm(init_fn, step_fn, sample_fn)
+
+    @partial(jit, static_argnames=["n_samples"])
+    def sample_data_fn(rng_key, gen_params, n_samples) -> ArrayLike:
+        return sample_data(
+            rng_key, gen_params, generative_model.apply, n_samples, latent_dim
+        )
+
+    return AEVBAlgorithm(
+        recognition_model, generative_model, init_fn, step_fn, sample_data_fn
+    )
