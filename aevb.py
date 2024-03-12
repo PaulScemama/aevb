@@ -153,21 +153,21 @@ class AEVBInfo(NamedTuple):
 def AEVB(
     *,
     latent_dim: int,
-    generative_model: Callable,
+    generative_model: nn.Module,
     optimizer: GradientTransformation,
     n_samples: int,
     recognition_feature_extractor: Callable = None,
-    recognition_model: Callable = None,
+    recognition_model: nn.Module = None,
 ) -> tuple[Callable, Callable, Callable]:
     """_summary_
 
     Args:
         latent_dim (int): _description_
-        generative_model (Callable): _description_
+        generative_model (nn.Module): _description_
         optimizer (GradientTransformation): _description_
         n_samples (int): _description_
         recognition_feature_extractor (Callable, optional): _description_. Defaults to None.
-        recognition_model (Callable, optional): _description_. Defaults to None.
+        recognition_model (nn.Module, optional): _description_. Defaults to None.
 
     Raises:
         ValueError: _description_
