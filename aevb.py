@@ -1,7 +1,6 @@
 from functools import partial as bind
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Union
 
-import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import optax
@@ -123,19 +122,6 @@ def sample_data(
     return x
 
 
-class RecognitionModel(nn.Module):
-
-    latent_dim: int
-    feature_extractor: nn.Module
-
-    @nn.compact
-    def __call__(self, x):
-        x = self.feature_extractor(x)
-        z_mu = nn.Dense(features=self.latent_dim)(x)
-        z_logvar = nn.Dense(features=self.latent_dim)(x)
-        z_sigma = jnp.exp(z_logvar * 0.5)
-
-        return z_mu, z_sigma
 
 
 class AEVBState(NamedTuple):
@@ -151,40 +137,26 @@ class AEVBInfo(NamedTuple):
 
 
 def AEVB(
-    *,
     latent_dim: int,
-    generative_model: nn.Module,
+    generative_model: tuple[Callable, Callable],
+    recognition_model: tuple[Callable, Callable],
     optimizer: GradientTransformation,
     n_samples: int,
-    recognition_feature_extractor: Callable = None,
-    recognition_model: nn.Module = None,
 ) -> tuple[Callable, Callable, Callable]:
     """_summary_
 
     Args:
         latent_dim (int): _description_
-        generative_model (nn.Module): _description_
+        generative_model (tuple[Callable, Callable]): _description_
+        recognition_model (tuple[Callable, Callable]): _description_
         optimizer (GradientTransformation): _description_
         n_samples (int): _description_
-        recognition_feature_extractor (Callable, optional): _description_. Defaults to None.
-        recognition_model (nn.Module, optional): _description_. Defaults to None.
-
-    Raises:
-        ValueError: _description_
 
     Returns:
         tuple[Callable, Callable, Callable]: _description_
     """
-
-    if (recognition_feature_extractor is None) == (recognition_model is None):
-        raise ValueError(
-            "Either `recognition_feature_extractor` or `recognition_model` must be specified, but not both."
-        )
-
-    if recognition_feature_extractor:
-        recognition_model: nn.Module = RecognitionModel(
-            latent_dim, recognition_feature_extractor
-        )
+    gen_init, gen_apply = generative_model
+    rec_init, rec_apply = recognition_model
 
     def init_fn(rng_key: PRNGKey, data_shape: tuple) -> AEVBState:
         """_summary_
@@ -197,8 +169,8 @@ def AEVB(
             AEVBState: _description_
         """
         rec_init_key, gen_init_key = split(rng_key)
-        rec_params = recognition_model.init(rec_init_key, jnp.ones(data_shape))
-        gen_params = generative_model.init(gen_init_key, jnp.ones(latent_dim))
+        rec_params = rec_init(rec_init_key, jnp.ones(data_shape))
+        gen_params = gen_init(gen_init_key, jnp.ones(latent_dim))
         opt_state = optimizer.init((rec_params, gen_params))
         return AEVBState(rec_params, gen_params, opt_state)
 
@@ -229,8 +201,8 @@ def AEVB(
                 state.gen_params,
                 state.opt_state,
                 x,
-                recognition_model.apply,
-                generative_model.apply,
+                rec_apply,
+                gen_apply,
                 optimizer,
                 n_samples,
             )
@@ -252,7 +224,7 @@ def AEVB(
             ArrayLike: _description_
         """
         return sample_data(
-            rng_key, gen_params, generative_model.apply, n_samples, latent_dim
+            rng_key, gen_params, gen_apply, n_samples, latent_dim
         )
 
     return init_fn, step_fn, sample_data_fn

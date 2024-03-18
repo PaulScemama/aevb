@@ -49,7 +49,9 @@ class GenModel(nn.Module):
         return x
 
 
-class RecFeatureExtractor(nn.Module):
+class RecModel(nn.Module):
+    latent_dim: int
+
     @nn.compact
     def __call__(self, x):
         x = nn.Dense(features=512)(x)
@@ -59,7 +61,10 @@ class RecFeatureExtractor(nn.Module):
         x = nn.Dense(features=128)(x)
         x = nn.relu(x)
         x = nn.Dense(features=64)(x)
-        return x
+        z_mu = nn.Dense(features=self.latent_dim)(x)
+        z_logvar = nn.Dense(features=self.latent_dim)(x)
+        z_sigma = jnp.exp(z_logvar * 0.5)
+        return z_mu, z_sigma
 
 
 # Main Function --------------------------------
@@ -80,20 +85,20 @@ def main(save_samples_pth: str):
     # Create AEVB inference engine
     latent_dim = 4
     gen_model = GenModel()
-    rec_feat_extractor = RecFeatureExtractor()
+    rec_model = RecModel(latent_dim)
     optimizer = optax.adam(1e-3)
 
     init, step, sample_data = AEVB(
         latent_dim=latent_dim,
-        recognition_feature_extractor=rec_feat_extractor,
-        generative_model=gen_model,
+        generative_model=(gen_model.init, gen_model.apply),
+        recognition_model=(rec_model.init, rec_model.apply),
         optimizer=optimizer,
         n_samples=15,
     )
 
     # Run AEVB
     key = PRNGKey(1242)
-    num_steps = 5
+    num_steps = 50000
     eval_every = 100
 
     key, init_key = split(key)
