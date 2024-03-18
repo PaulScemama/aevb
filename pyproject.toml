@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+
+
+[project]
+name = "aevb"
+authors= [{name = "The Blackjax team", email = "remi@thetypicalset.com"}]
+description = "Flexible and fast sampling in Python"
+requires-python = ">=3.9"
+keywords=[
+    "probability",
+    "machine learning",
+    "statistics",
+    "mcmc",
+    "sampling",
+]
