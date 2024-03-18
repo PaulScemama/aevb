@@ -90,8 +90,8 @@ def main(save_samples_pth: str):
 
     init, step, sample_data = AEVB(
         latent_dim=latent_dim,
-        generative_model=(gen_model.init, gen_model.apply),
-        recognition_model=(rec_model.init, rec_model.apply),
+        generative_model=gen_model,
+        recognition_model=rec_model,
         optimizer=optimizer,
         n_samples=15,
     )
