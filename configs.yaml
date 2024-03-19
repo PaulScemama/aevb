@@ -2,6 +2,7 @@ defaults:
 
   seed: 0
   dataset: ''
+  nnlib: flax
 
 
   jax:

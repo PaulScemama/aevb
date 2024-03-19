@@ -6,7 +6,7 @@ except ModuleNotFoundError:
 
 from typing import List, Callable
 import jax.numpy as jnp
-import flax.linen as nn
+
 
 class FlaxMLPEncoder(nn.Module):
     latent_dim: int
@@ -27,7 +27,7 @@ class FlaxMLPEncoder(nn.Module):
     
 
 class FlaxMLPDecoder(nn.Module):
-    out: int
+    out_dim: int
     hidden: List[int]
     activation: Callable
 
