@@ -12,8 +12,10 @@ defaults:
     steps: 10000
     eval_every: 100
 
+  data_shape: [28, 28]
   latent_dim: 4
-  gen_hidden: [128, 256, 784]
+
+  gen_hidden: [128, 256]
   rec_hidden: [512, 256, 128, 64]
   act: relu
   init: {init: glorot_normal, params: None}

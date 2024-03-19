@@ -1,1 +1,1 @@
-from aevb._src.nets_flax import FlaxMLP
+from aevb._src.nets_flax import FlaxMLPEncoder, FlaxMLPDecoder

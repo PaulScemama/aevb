@@ -5,20 +5,37 @@ except ModuleNotFoundError:
 
 
 from typing import List, Callable
-
+import jax.numpy as jnp
 import flax.linen as nn
 
-
-class FlaxMLP(nn.Module):
+class FlaxMLPEncoder(nn.Module):
+    latent_dim: int
     hidden: List[int]
     activation: Callable
 
     @nn.compact
     def __call__(self, x):
-        num_layers = len(self.hidden)
-        for i, h in enumerate(self.hidden):
+        for h in self.hidden:
             x = nn.Dense(h)(x)
-            if i < num_layers:
-                x = self.activation(x)
+            x = self.activation(x)
+        
+        # Project to mu and log var
+        mu = nn.Dense(self.latent_dim)(x)
+        logvar = nn.Dense(self.latent_dim)(x)
+        sigma = jnp.exp(logvar * 0.5)
+        return mu, sigma
+    
+
+class FlaxMLPDecoder(nn.Module):
+    out: int
+    hidden: List[int]
+    activation: Callable
+
+    @nn.compact
+    def __call__(self, x):
+        for h in self.hidden:
+            x = nn.Dense(h)(x)
+            x = self.activation(x)
+        x = nn.Dense(self.out)
         return x
     
