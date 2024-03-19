@@ -155,6 +155,19 @@ def AEVB(
     Returns:
         tuple[Callable, Callable, Callable]: _description_
     """
+
+            
+    def _init_apply_init_fn(rng_key: PRNGKey, data_shape: tuple, rec_init: Callable, gen_init: Callable) -> AEVBState:
+        rec_init_key, gen_init_key = split(rng_key)
+        rec_params = rec_init(rec_init_key, jnp.ones(data_shape))
+        gen_params = gen_init(gen_init_key, jnp.ones(latent_dim))
+        opt_state = optimizer.init((rec_params, gen_params))
+        return AEVBState(rec_params, gen_params, opt_state)
+
+    def _model_init_fn(rec_params, gen_params) -> AEVBState:
+        opt_state = optimizer.init((rec_params, gen_params))
+        return AEVBState(rec_params, gen_params, opt_state)
+
     # TODO: handle different generative model / recognition models
     # gen_init, gen_apply = generative_model
     # rec_init, rec_apply = recognition_model
@@ -178,18 +191,6 @@ def AEVB(
             init_fn = _model_init_fn
             rec_apply = recognition_model
             gen_apply = generative_model
-            
-    def _init_apply_init_fn(rng_key: PRNGKey, data_shape: tuple, rec_init: Callable, gen_init: Callable) -> AEVBState:
-        rec_init_key, gen_init_key = split(rng_key)
-        rec_params = rec_init(rec_init_key, jnp.ones(data_shape))
-        gen_params = gen_init(gen_init_key, jnp.ones(latent_dim))
-        opt_state = optimizer.init((rec_params, gen_params))
-        return AEVBState(rec_params, gen_params, opt_state)
-
-    def _model_init_fn(rec_params, gen_params) -> AEVBState:
-        opt_state = optimizer.init((rec_params, gen_params))
-        return AEVBState(rec_params, gen_params, opt_state)
-
 
     @jit
     def step_fn(rng_key, state, x) -> tuple[AEVBState, AEVBInfo]:

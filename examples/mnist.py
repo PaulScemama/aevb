@@ -7,7 +7,7 @@ import optax
 from datasets import load_dataset
 from jax.random import PRNGKey, split
 
-from aevb import AEVB
+from aevb.core import AEVB
 
 
 # Data Processing Functions ----------------------------------
