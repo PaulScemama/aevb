@@ -36,6 +36,6 @@ class FlaxMLPDecoder(nn.Module):
         for h in self.hidden:
             x = nn.Dense(h)(x)
             x = self.activation(x)
-        x = nn.Dense(self.out)
+        x = nn.Dense(self.out_dim)
         return x
     
