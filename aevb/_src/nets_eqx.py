@@ -20,6 +20,9 @@ class EqxMLPEncoder(eqx.Module):
     hidden: List[int]
     activation: Callable
 
+    def __post_init__(self, rng_key: PRNGKey):
+        ...
+
 
     @bind(vmap, in_axes=[None, None, 0])
     def __call__(self, key: PRNGKey, x: jnp.array):

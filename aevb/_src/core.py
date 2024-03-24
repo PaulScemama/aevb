@@ -142,17 +142,43 @@ def AEVB(
     optimizer: GradientTransformation,
     n_samples: int,
 ) -> tuple[Callable, Callable, Callable]:
-    """_summary_
+    """Create an `init_fn`, `step_fn`, and `sample_data_fn` for the 
+    AEVB (auto-encoding variational bayes) inference algorithm. This 
+    function should be called when the `apply` functions are already in
+    there necessary forms (see below). To construct the AEVB algorithm with flax/equinox
+    models, see `aevb.core.AEVB`. 
+
+    NOTE: The `*_apply` callable inputs must have the following
+    signature:
+
+    def apply(params: ArrayLikeTree, state: ArrayLikeTree, input: Array, train: bool)
+        -> tuple[ArrayTree, ArrayTree]
+    
+    That is, it takes in parameters, a mutable state, an input, and a train flag and returns
+    the output as well as the updated mutable state. The state can be an empty
+    dictionary {} when no mutable state is needed. The inputs are only used by keyword so 
+    positioning is not important. 
 
     Args:
-        latent_dim (int): _description_
-        generative_model (tuple[Callable, Callable]): _description_
-        recognition_model (tuple[Callable, Callable]): _description_
-        optimizer (GradientTransformation): _description_
-        n_samples (int): _description_
+        latent_dim (int): The dimension of the latent variable z.
+        generative_apply (Callable): The apply function for the generative model which maps
+        a latent variable z to a data point x. See above for more details on this above.
+        recognition_apply (Callable): The apply function for the recognition model which maps
+        a data point x to its latent variable z. See above for more details on this above.
+        optimizer (GradientTransformation): The optax optimizer for running gradient descent.
+        n_samples (int): The number of samples to take from q(z|x) for each step in the 
+        inference algorithm.
 
     Returns:
-        tuple[Callable, Callable, Callable]: _description_
+        tuple[Callable, Callable, Callable]: Three functions.
+            1. An `init_fn`: this will output an AEVBState instance based on
+            the recognition/generative model's parameters and states.
+            2. A `step_fn`: this takes in an rng_key and an AEVBState instance as
+            well as a batch of data and return a new AEVBState instance and an
+            AEVBInfo instance after taking a step of inference (optimization).
+            3. A `sample_data_fn`: this samples datapoints x by sampling from a 
+            N(0,1) distribution over the latent dimension and then using the 
+            generative model to map these latent variable samples to data samples.
     """
 
     gen_apply = generative_apply

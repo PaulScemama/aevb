@@ -105,7 +105,7 @@ def main(save_samples_pth: str):
     eval_every = 100
 
     key, init_key = split(key)
-    state = init(init_key, X_train.shape[-1], latent_dim)
+    state = init(init_key, X_train.shape[-1])
 
     key, *training_keys = split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):
