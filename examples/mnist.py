@@ -40,8 +40,9 @@ def data_stream(seed, data, batch_size, data_size):
 # Generative Model and Recognition Feature Extractor --------------------
 class GenModel(nn.Module):
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, train: bool = False):
         x = nn.Dense(features=128)(x)
+        x = nn.BatchNorm(use_running_average=not train)(x)
         x = nn.relu(x)
         x = nn.Dense(features=256)(x)
         x = nn.relu(x)
@@ -53,8 +54,9 @@ class RecModel(nn.Module):
     latent_dim: int
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, train: bool = False):
         x = nn.Dense(features=512)(x)
+        x = nn.BatchNorm(use_running_average=not train)(x)
         x = nn.relu(x)
         x = nn.Dense(features=256)(x)
         x = nn.relu(x)
@@ -94,15 +96,16 @@ def main(save_samples_pth: str):
         recognition_model=rec_model,
         optimizer=optimizer,
         n_samples=15,
+        nn_lib="flax",
     )
 
     # Run AEVB
     key = PRNGKey(1242)
-    num_steps = 50000
+    num_steps = 10000
     eval_every = 100
 
     key, init_key = split(key)
-    state = init(init_key, X_train.shape[-1])
+    state = init(init_key, X_train.shape[-1], latent_dim)
 
     key, *training_keys = split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):
@@ -113,7 +116,7 @@ def main(save_samples_pth: str):
 
     # Random Data Samples of Learned Generative Model
     key, data_samples_key = split(key)
-    samples = sample_data(data_samples_key, state.gen_params, 5)
+    samples, _ = sample_data(data_samples_key, state.gen_params, state.gen_state, 5)
     fig, axs = plt.subplots(5, 1)
     for i, s in enumerate(samples):
         axs[i].imshow(s.reshape(28, 28))

@@ -22,6 +22,7 @@ References:
 """
 
 
+
 def normal_like(rng_key: PRNGKey, tree: ArrayLikeTree, n_samples: int) -> ArrayTree:
     """Generate `n_samples` PyTree objects containing samples from a unit normal distribution."""
     treedef = tree_structure(tree)
@@ -33,14 +34,6 @@ def normal_like(rng_key: PRNGKey, tree: ArrayLikeTree, n_samples: int) -> ArrayT
         tree_unflatten(treedef, all_keys),
     )
     return noise
-
-
-def normal_loglikelihood_fn(apply_fn, params, z, x):
-    """Use the `params` along with the `apply_fn` to predict `x` from `z`. Then
-    compute the observed data `x` under a normal distribution parameterized by the
-    predicted `x` as its mean."""
-    pred_x = apply_fn(params, z)
-    return -((x - pred_x) ** 2)
 
 
 def reparameterized_sample(
@@ -73,7 +66,9 @@ def unit_normal_kl(mu, sigma):
 def tractable_kl_step(
     rng_key: PRNGKey,
     rec_params: ArrayLikeTree,
+    rec_state: ArrayLikeTree,
     gen_params: ArrayLikeTree,
+    gen_state: ArrayLikeTree,
     opt_state: ArrayLikeTree,
     x: ArrayLike,
     rec_apply_fn: Callable,
@@ -83,22 +78,23 @@ def tractable_kl_step(
 ) -> tuple[
     tuple[ArrayLikeTree, ArrayLikeTree, ArrayLikeTree], tuple[float, float, float]
 ]:
-
     def loss_fn(
         rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
     ) -> tuple[float, tuple[float, float]]:
 
-        pred_z_mu, pred_z_sigma = rec_apply_fn(rec_params, x)
-        z_samples = reparameterized_sample(rng_key, pred_z_mu, pred_z_sigma, n_samples)
+        (z_mu, z_sigma), new_rec_state = rec_apply_fn(params=rec_params, state=rec_state, input=x, train=True)
+        z_samples = reparameterized_sample(rng_key, z_mu, z_sigma, n_samples)
         z = z_samples.mean(axis=0)
+        kl = unit_normal_kl(z_mu, z_sigma).mean()
 
-        kl = unit_normal_kl(pred_z_mu, pred_z_sigma).mean()
-        nll = -normal_loglikelihood_fn(gen_apply_fn, gen_params, z, x).sum()
+        x_pred, new_gen_state = gen_apply_fn(params=gen_params, state=gen_state, input=z, train=True)
+        nll = ((x - x_pred) ** 2).sum()
+
         loss = nll + kl
-        return loss, (nll, kl)
+        return loss, ((nll, kl), (new_rec_state, new_gen_state))
 
     loss_grad_fn = jax.value_and_grad(loss_fn, has_aux=True, argnums=(0, 1))
-    (loss_val, (nll, kl)), (rec_grad, gen_grad) = loss_grad_fn(rec_params, gen_params)
+    (loss_val, ((nll, kl), (new_rec_state, new_gen_state))), (rec_grad, gen_grad) = loss_grad_fn(rec_params, gen_params)
 
     (rec_updates, gen_updates), new_opt_state = optimizer.update(
         (rec_grad, gen_grad),
@@ -107,26 +103,29 @@ def tractable_kl_step(
     )
     new_rec_params = optax.apply_updates(rec_params, rec_updates)
     new_gen_params = optax.apply_updates(gen_params, gen_updates)
-    return (new_rec_params, new_gen_params, new_opt_state), (loss_val, nll, kl)
+    return ((new_rec_params, new_rec_state), (new_gen_params, new_gen_state), new_opt_state), (loss_val, nll, kl)
 
 
 def sample_data(
     rng_key: PRNGKey,
     gen_params: ArrayLikeTree,
+    gen_state: ArrayLikeTree,
     gen_apply_fn: Callable,
     n_samples: int,
     latent_dim: int,
 ):
     z = jax.random.normal(rng_key, shape=(n_samples, latent_dim))
-    x = gen_apply_fn(gen_params, z)
-    return x
+    x, gen_state = gen_apply_fn(params=gen_params, state=gen_state, input=z, train=False)
+    return x, gen_state
 
 
 
 
 class AEVBState(NamedTuple):
     rec_params: ArrayLikeTree
+    rec_state: ArrayLikeTree
     gen_params: ArrayLikeTree
+    gen_state: ArrayLikeTree
     opt_state: OptState
 
 
@@ -138,8 +137,8 @@ class AEVBInfo(NamedTuple):
 
 def AEVB(
     latent_dim: int,
-    generative_model: Callable | tuple[Callable, Callable],
-    recognition_model: Callable | tuple[Callable, Callable],
+    generative_apply: Callable,
+    recognition_apply: Callable,
     optimizer: GradientTransformation,
     n_samples: int,
 ) -> tuple[Callable, Callable, Callable]:
@@ -156,44 +155,15 @@ def AEVB(
         tuple[Callable, Callable, Callable]: _description_
     """
 
-            
-    def _init_apply_init_fn(rng_key: PRNGKey, data_shape: tuple, rec_init: Callable, gen_init: Callable) -> AEVBState:
-        rec_init_key, gen_init_key = split(rng_key)
-        rec_params = rec_init(rec_init_key, jnp.ones(data_shape))
-        gen_params = gen_init(gen_init_key, jnp.ones(latent_dim))
+    gen_apply = generative_apply
+    rec_apply = recognition_apply
+
+    def init_fn(rec_params, rec_state, gen_params, gen_state) -> AEVBState:
         opt_state = optimizer.init((rec_params, gen_params))
-        return AEVBState(rec_params, gen_params, opt_state)
-
-    def _model_init_fn(rec_params, gen_params) -> AEVBState:
-        opt_state = optimizer.init((rec_params, gen_params))
-        return AEVBState(rec_params, gen_params, opt_state)
-
-    # TODO: handle different generative model / recognition models
-    # gen_init, gen_apply = generative_model
-    # rec_init, rec_apply = recognition_model
-    if isinstance(recognition_model, tuple) and isinstance(generative_model, tuple):
-        rec_init, _ = recognition_model
-        gen_init, _ = generative_model
-        init_fn = bind(_init_apply_init_fn, rec_init=rec_init, gen_init=gen_init)
-        _, rec_apply = recognition_model
-        _, gen_apply = generative_model
-
-    elif isinstance(recognition_model, object) and isinstance(generative_model, object):
-        # Passed in a Module instance with .init, .apply 
-        try:
-            rec_init, _ = recognition_model.init, recognition_model.apply
-            gen_init, _ = generative_model.init, generative_model.apply
-            init_fn = bind(_init_apply_init_fn,  rec_init=rec_init, gen_init=gen_init)
-            rec_apply = recognition_model.apply
-            gen_apply = generative_model.apply
-        # Passed in a Module instance without a .init, .apply method
-        except AttributeError:
-            init_fn = _model_init_fn
-            rec_apply = recognition_model
-            gen_apply = generative_model
+        return AEVBState(rec_params, rec_state, gen_params, gen_state, opt_state)
 
     @jit
-    def step_fn(rng_key, state, x) -> tuple[AEVBState, AEVBInfo]:
+    def step_fn(rng_key, aevb_state, x) -> tuple[AEVBState, AEVBInfo]:
         """Take a step of Algorithm 1 from [1] using the second verison of the
         SGVB estimator which takes advantage of an analytical KL term when the prior
         p(z) is a unit normal.
@@ -212,12 +182,14 @@ def AEVB(
         Returns:
             tuple[AEVBState, AEVBInfo]: _description_
         """
-        (new_rec_params, new_gen_params, new_opt_state), (loss_val, nll, kl) = (
+        ((new_rec_params,new_rec_state), (new_gen_params, new_gen_state), new_opt_state), (loss_val, nll, kl) = (
             tractable_kl_step(
                 rng_key,
-                state.rec_params,
-                state.gen_params,
-                state.opt_state,
+                aevb_state.rec_params,
+                aevb_state.rec_state,
+                aevb_state.gen_params,
+                aevb_state.gen_state,
+                aevb_state.opt_state,
                 x,
                 rec_apply,
                 gen_apply,
@@ -225,12 +197,12 @@ def AEVB(
                 n_samples,
             )
         )
-        return AEVBState(new_rec_params, new_gen_params, new_opt_state), AEVBInfo(
+        return AEVBState(new_rec_params, new_rec_state, new_gen_params, new_gen_state, new_opt_state), AEVBInfo(
             loss_val, nll, kl
         )
 
     @bind(jit, static_argnames=["n_samples"])
-    def sample_data_fn(rng_key, gen_params, n_samples) -> ArrayLike:
+    def sample_data_fn(rng_key, gen_params, gen_state, n_samples) -> ArrayLike:
         """_summary_
 
         Args:
@@ -242,7 +214,7 @@ def AEVB(
             ArrayLike: _description_
         """
         return sample_data(
-            rng_key, gen_params, gen_apply, n_samples, latent_dim
+            rng_key, gen_params, gen_state, gen_apply, n_samples, latent_dim
         )
 
     return init_fn, step_fn, sample_data_fn

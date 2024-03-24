@@ -14,7 +14,7 @@ class FlaxMLPEncoder(nn.Module):
     activation: Callable
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, train: bool = False):
         for h in self.hidden:
             x = nn.Dense(h)(x)
             x = self.activation(x)
@@ -32,7 +32,7 @@ class FlaxMLPDecoder(nn.Module):
     activation: Callable
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, train: bool = False):
         for h in self.hidden:
             x = nn.Dense(h)(x)
             x = self.activation(x)
