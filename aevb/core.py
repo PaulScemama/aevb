@@ -7,61 +7,11 @@ from aevb._src.core import AEVBInfo
 from aevb._src.core import AEVB as _AEVB
 
 
-# Flax
-def wrap_flax_model(flax_model):
-    init = wrap_flax_init(flax_model.init)
-    apply = wrap_flax_apply(flax_model.apply)
-    return init, apply
-
-def wrap_flax_apply(flax_apply):
-    def apply(*, params, state={}, input, train: bool):
-        out, updates = flax_apply({'params': params, **state}, input, train=train, mutable=list(state.keys()))
-        return out, updates
-    return apply
-
-def wrap_flax_init(flax_init):
-    def init(rng_key, x):
-        variables = flax_init(rng_key, x, train=False)
-        params = variables['params']
-        state = {k:v for k,v in variables.items() if k != 'params'}
-        return params, state
-    return init
-
-
-# Equinox
-def wrap_eqx_model(eqx_model: Type, **init_kwargs):
-    try:
-            import equinox as eqx
-    except ModuleNotFoundError:
-            raise ModuleNotFoundError("Please install equinox if you intend to use it.")
-
-    # Get `static` information from model for combining in `apply` later...
-    model, _ = eqx.nn.make_with_state(eqx_model)(random.key(0), **init_kwargs)
-    _, static = eqx.partition(model, eqx.is_inexact_array)
-
-    def init(rng_key):
-        model, state = eqx.nn.make_with_state(eqx_model)(rng_key, **init_kwargs)
-        params, _ = eqx.partition(model, eqx.is_inexact_array)
-        return params, state
-    
-    def apply(*, params, state={}, input, train: bool):
-        model = eqx.combine(params, static)
-        if not train:
-            model = eqx.nn.inference_mode(model)
-        out, updates = model(input, state)
-        return out, updates
-    
-    return init, apply
-
-
-
-def wrap_eqx_init():
-    ...
 
 def AEVB(
     latent_dim: int,
-    generative_model: object | tuple[Type, Optional[dict]],
-    recognition_model: object | tuple[Type, Optional[dict]],
+    generative_model: object | tuple[Type, dict],
+    recognition_model: object | tuple[Type, dict],
     optimizer: GradientTransformation,
     n_samples: int,
     nn_lib: str ="flax",
@@ -97,8 +47,9 @@ def AEVB(
     """
 
     if nn_lib == "flax":
-        gen_init, gen_apply = wrap_flax_model(generative_model)
-        rec_init, rec_apply = wrap_flax_model(recognition_model)
+        from aevb._src.flax import convert_flax_model
+        gen_init, gen_apply = convert_flax_model(generative_model)
+        rec_init, rec_apply = convert_flax_model(recognition_model)
 
         def init_fn(rng_key, data_dim) -> AEVBState:
             (gen_params, gen_state) = gen_init(rng_key, jnp.ones((1, latent_dim)))
@@ -108,12 +59,23 @@ def AEVB(
 
 
     elif nn_lib == "equinox":
-        gen_init, gen_apply = wrap_eqx_model(generative_model)
-        rec_init, rec_apply = wrap_eqx_model(recognition_model)
+        # signature: (model_type: Type, rng_key: PRNGKey, **model_kwargs)
+        from aevb._src.eqx import convert_eqx_model
+        
+        def create_init_apply(model: tuple[Type, dict]):
+            model_type, model_kwargs = model
+            assert "rng_key" in model_kwargs.keys(), "Need an `rng_key`: PRNGKey key:value pair in model kwargs."
+            rng_key = model_kwargs["rng_key"]
+            model_kwargs = {k:v for k,v in model_kwargs.items() if k != "rng_key"}
+            init, apply = convert_eqx_model(model_type, rng_key, **model_kwargs)
+            return init, apply
+        
+        gen_init, gen_apply = create_init_apply(generative_model)
+        rec_init, rec_apply = create_init_apply(recognition_model)
 
-        def init_fn(rng_key) -> AEVBState:
-            (gen_params, gen_state) = gen_init(rng_key)
-            (rec_params, rec_state) = rec_init(rng_key)
+        def init_fn() -> AEVBState:
+            (gen_params, gen_state) = gen_init()
+            (rec_params, rec_state) = rec_init()
             opt_state = optimizer.init((rec_params, gen_params))
             return AEVBState(rec_params, rec_state, gen_params, gen_state, opt_state)
 
