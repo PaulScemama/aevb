@@ -6,10 +6,9 @@ import jax.numpy as jnp
 import optax
 from jax import jit
 from jax.random import PRNGKey, split
+from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
-
-from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 
 ArrayTree = Union[jax.Array, Iterable["ArrayTree"], Mapping[Any, "ArrayTree"]]
 ArrayLikeTree = Union[
@@ -20,7 +19,6 @@ References:
 
     [1] "Auto-Encoding Variational Bayes" (Kingma & Welling, 2013)
 """
-
 
 
 def normal_like(rng_key: PRNGKey, tree: ArrayLikeTree, n_samples: int) -> ArrayTree:
@@ -82,19 +80,25 @@ def tractable_kl_step(
         rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
     ) -> tuple[float, tuple[float, float]]:
 
-        (z_mu, z_sigma), new_rec_state = rec_apply_fn(params=rec_params, state=rec_state, input=x, train=True)
+        (z_mu, z_sigma), new_rec_state = rec_apply_fn(
+            params=rec_params, state=rec_state, input=x, train=True
+        )
         z_samples = reparameterized_sample(rng_key, z_mu, z_sigma, n_samples)
         z = z_samples.mean(axis=0)
         kl = unit_normal_kl(z_mu, z_sigma).mean()
 
-        x_pred, new_gen_state = gen_apply_fn(params=gen_params, state=gen_state, input=z, train=True)
+        x_pred, new_gen_state = gen_apply_fn(
+            params=gen_params, state=gen_state, input=z, train=True
+        )
         nll = ((x - x_pred) ** 2).sum()
 
         loss = nll + kl
         return loss, ((nll, kl), (new_rec_state, new_gen_state))
 
     loss_grad_fn = jax.value_and_grad(loss_fn, has_aux=True, argnums=(0, 1))
-    (loss_val, ((nll, kl), (new_rec_state, new_gen_state))), (rec_grad, gen_grad) = loss_grad_fn(rec_params, gen_params)
+    (loss_val, ((nll, kl), (new_rec_state, new_gen_state))), (rec_grad, gen_grad) = (
+        loss_grad_fn(rec_params, gen_params)
+    )
 
     (rec_updates, gen_updates), new_opt_state = optimizer.update(
         (rec_grad, gen_grad),
@@ -103,7 +107,11 @@ def tractable_kl_step(
     )
     new_rec_params = optax.apply_updates(rec_params, rec_updates)
     new_gen_params = optax.apply_updates(gen_params, gen_updates)
-    return ((new_rec_params, new_rec_state), (new_gen_params, new_gen_state), new_opt_state), (loss_val, nll, kl)
+    return (
+        (new_rec_params, new_rec_state),
+        (new_gen_params, new_gen_state),
+        new_opt_state,
+    ), (loss_val, nll, kl)
 
 
 def sample_data(
@@ -115,10 +123,10 @@ def sample_data(
     latent_dim: int,
 ):
     z = jax.random.normal(rng_key, shape=(n_samples, latent_dim))
-    x, gen_state = gen_apply_fn(params=gen_params, state=gen_state, input=z, train=False)
+    x, gen_state = gen_apply_fn(
+        params=gen_params, state=gen_state, input=z, train=False
+    )
     return x, gen_state
-
-
 
 
 class AEVBState(NamedTuple):
@@ -142,22 +150,22 @@ def AEVB(
     optimizer: GradientTransformation,
     n_samples: int,
 ) -> tuple[Callable, Callable, Callable]:
-    """Create an `init_fn`, `step_fn`, and `sample_data_fn` for the 
-    AEVB (auto-encoding variational bayes) inference algorithm. This 
+    """Create an `init_fn`, `step_fn`, and `sample_data_fn` for the
+    AEVB (auto-encoding variational bayes) inference algorithm. This
     function should be called when the `apply` functions are already in
     there necessary forms (see below). To construct the AEVB algorithm with flax/equinox
-    models, see `aevb.core.AEVB`. 
+    models, see `aevb.core.AEVB`.
 
     NOTE: The `*_apply` callable inputs must have the following
     signature:
 
     def apply(params: ArrayLikeTree, state: ArrayLikeTree, input: Array, train: bool)
         -> tuple[ArrayTree, ArrayTree]
-    
+
     That is, it takes in parameters, a mutable state, an input, and a train flag and returns
     the output as well as the updated mutable state. The state can be an empty
-    dictionary {} when no mutable state is needed. The inputs are only used by keyword so 
-    positioning is not important. 
+    dictionary {} when no mutable state is needed. The inputs are only used by keyword so
+    positioning is not important.
 
     Args:
         latent_dim (int): The dimension of the latent variable z.
@@ -166,7 +174,7 @@ def AEVB(
         recognition_apply (Callable): The apply function for the recognition model which maps
         a data point x to its latent variable z. See above for more details on this above.
         optimizer (GradientTransformation): The optax optimizer for running gradient descent.
-        n_samples (int): The number of samples to take from q(z|x) for each step in the 
+        n_samples (int): The number of samples to take from q(z|x) for each step in the
         inference algorithm.
 
     Returns:
@@ -176,8 +184,8 @@ def AEVB(
             2. A `step_fn`: this takes in an rng_key and an AEVBState instance as
             well as a batch of data and return a new AEVBState instance and an
             AEVBInfo instance after taking a step of inference (optimization).
-            3. A `sample_data_fn`: this samples datapoints x by sampling from a 
-            N(0,1) distribution over the latent dimension and then using the 
+            3. A `sample_data_fn`: this samples datapoints x by sampling from a
+            N(0,1) distribution over the latent dimension and then using the
             generative model to map these latent variable samples to data samples.
     """
 
@@ -208,24 +216,26 @@ def AEVB(
         Returns:
             tuple[AEVBState, AEVBInfo]: _description_
         """
-        ((new_rec_params,new_rec_state), (new_gen_params, new_gen_state), new_opt_state), (loss_val, nll, kl) = (
-            tractable_kl_step(
-                rng_key,
-                aevb_state.rec_params,
-                aevb_state.rec_state,
-                aevb_state.gen_params,
-                aevb_state.gen_state,
-                aevb_state.opt_state,
-                x,
-                rec_apply,
-                gen_apply,
-                optimizer,
-                n_samples,
-            )
+        (
+            (new_rec_params, new_rec_state),
+            (new_gen_params, new_gen_state),
+            new_opt_state,
+        ), (loss_val, nll, kl) = tractable_kl_step(
+            rng_key,
+            aevb_state.rec_params,
+            aevb_state.rec_state,
+            aevb_state.gen_params,
+            aevb_state.gen_state,
+            aevb_state.opt_state,
+            x,
+            rec_apply,
+            gen_apply,
+            optimizer,
+            n_samples,
         )
-        return AEVBState(new_rec_params, new_rec_state, new_gen_params, new_gen_state, new_opt_state), AEVBInfo(
-            loss_val, nll, kl
-        )
+        return AEVBState(
+            new_rec_params, new_rec_state, new_gen_params, new_gen_state, new_opt_state
+        ), AEVBInfo(loss_val, nll, kl)
 
     @bind(jit, static_argnames=["n_samples"])
     def sample_data_fn(rng_key, gen_params, gen_state, n_samples) -> ArrayLike:

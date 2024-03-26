@@ -1,7 +1,7 @@
-from typing import List
-
 import json
 from pathlib import Path
+from typing import List
+
 
 def _flatten(mapping, sep):
     result = {}
@@ -48,7 +48,6 @@ def _ensure_values(mapping):
     return result
 
 
-
 def _format_value(value):
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(_format_value(x) for x in value) + "]"
@@ -60,7 +59,6 @@ def _format_type(value):
         assert len(value) > 0, value
         return _format_type(value[0]) + "s"
     return str(type(value).__name__)
-
 
 
 class Config(dict):
@@ -75,12 +73,10 @@ class Config(dict):
         self._nested = _nest(mapping, self.SEP)
         super().__init__(self._nested)
 
-
-
     @property
     def flat(self):
         return self._flat
-    
+
     def __contains__(self, name):
         try:
             self[name]
@@ -118,10 +114,9 @@ class Config(dict):
             return super().__setitem__(key, value)
         message = f"Tried to set key '{key}' on immutable config. Use update()."
         raise AttributeError(message)
-    
+
     def __reduce__(self):
         return (type(self), (dict(self),))
-
 
     def prettyprint(self):
         lines = ["\nConfig:"]
@@ -137,7 +132,6 @@ class Config(dict):
             val = val.ljust(max_val)
             lines.append(f"{key}  {val}  ({typ})")
         print("\n".join(lines))
-
 
     def update(self, *args, **kwargs):
         result = self._flat.copy()
@@ -165,12 +159,13 @@ class Config(dict):
     @classmethod
     def from_yaml(cls, fp, override: str | List[str] = None):
         import ruamel.yaml as yaml
+
         yaml = yaml.YAML(typ="safe")
         data = yaml.load(Path(fp))
         to_return = data["defaults"]
         if override:
             if isinstance(override, str):
-                override = (override, )
+                override = (override,)
             for override_item in override:
                 override_with = data[override_item]
                 for k in to_return.keys():
@@ -179,9 +174,3 @@ class Config(dict):
         else:
             to_return = data["defaults"]
         return cls(to_return)
-
-
-
-
-
-

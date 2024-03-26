@@ -63,10 +63,10 @@ class RecModel(nn.Module):
         x = nn.Dense(features=128)(x)
         x = nn.relu(x)
         x = nn.Dense(features=64)(x)
-        z_mu = nn.Dense(features=self.latent_dim)(x)
-        z_logvar = nn.Dense(features=self.latent_dim)(x)
-        z_sigma = jnp.exp(z_logvar * 0.5)
-        return z_mu, z_sigma
+        mu = nn.Dense(features=self.latent_dim)(x)
+        logvar = nn.Dense(features=self.latent_dim)(x)
+        sigma = jnp.exp(logvar * 0.5)
+        return mu, sigma
 
 
 # Main Function --------------------------------
