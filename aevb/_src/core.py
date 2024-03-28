@@ -156,9 +156,14 @@ class AEVBAlgorithmUtil:
 
     def sample_data(self, key: PRNGKey, aevb_state: AEVBState, n_samples: int):
         z = jax.random.normal(key, shape=(n_samples, self.latent_dim))
-        return self.gen_apply(aevb_state.gen_params, aevb_state.state, z, train=False)
+        # Don't need to return state as it is not updated (train=False).
+        x, _ = self.gen_apply(
+            aevb_state.gen_params, aevb_state.gen_state, z, train=False
+        )
+        return x
 
     def encode(self, key: PRNGKey, aevb_state: AEVBState, x: ArrayLike, n_samples: int):
+        # Don't need to return state as it is not updated (train=False).
         (z_mu, z_sigma), _ = self.rec_apply(
             aevb_state.rec_params, aevb_state.rec_state, x, train=False
         )
@@ -166,6 +171,7 @@ class AEVBAlgorithmUtil:
         return z_samples
 
     def decode(self, aevb_state: AEVBState, z: ArrayLike):
+        # Don't need to return state as it is not updated (train=False).
         x, _ = self.gen_apply(
             aevb_state.gen_params, aevb_state.gen_state, z, train=False
         )

@@ -116,17 +116,28 @@ def main(save_samples_pth: str):
 
     # Random Data Samples of Learned Generative Model
     key, data_samples_key = split(key)
-    x_samples = engine.util.sample_data(
-        data_samples_key, aevb_state.gen_params, aevb_state.gen_state, 5
-    )
-    fig, axs = plt.subplots(5, 1)
-    for i, s in enumerate(x_samples):
-        axs[i].imshow(s.reshape(28, 28))
-    plt.savefig(save_samples_pth, format="png")
+    x_samples = engine.util.sample_data(data_samples_key, aevb_state, n_samples=5)
 
-    # Encode samples
-    z_samples = engine.util.encode(key, aevb_state, x_samples, n_samples=13)
-    print(z_samples.shape)
+    # Encode/Decode samples using Learned Recognition and Generative Models
+    key, encode_key, decode_key = split(key, 3)
+    z_samples = engine.util.encode(encode_key, aevb_state, x_samples, n_samples=30)
+    z_means = z_samples.mean(axis=0)
+    x_recon = engine.util.decode(aevb_state, z_means)
+
+    fig, axs = plt.subplots(2, 5)
+    for i, s in enumerate(x_samples):
+        axs[0][i].imshow(s.reshape(28, 28))
+    for i, s in enumerate(x_recon):
+        axs[1][i].imshow(s.reshape(28, 28))
+
+    plt.figtext(
+        0.5, 0.95, "Random Generative Samples", ha="center", va="top", fontsize=14
+    )
+    plt.figtext(0.5, 0.5, "Their Reconstructions", ha="center", va="top", fontsize=14)
+    plt.subplots_adjust(hspace=0.3)
+    plt.tight_layout()
+
+    plt.savefig(save_samples_pth, format="png")
 
 
 if __name__ == "__main__":
