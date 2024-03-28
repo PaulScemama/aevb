@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from jax import jit
-from jax.random import PRNGKey, split
+from jax.random import PRNGKey
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
@@ -114,21 +114,6 @@ def tractable_kl_step(
     ), (loss_val, nll, kl)
 
 
-def sample_data(
-    rng_key: PRNGKey,
-    gen_params: ArrayLikeTree,
-    gen_state: ArrayLikeTree,
-    gen_apply_fn: Callable,
-    n_samples: int,
-    latent_dim: int,
-):
-    z = jax.random.normal(rng_key, shape=(n_samples, latent_dim))
-    x, gen_state = gen_apply_fn(
-        params=gen_params, state=gen_state, input=z, train=False
-    )
-    return x, gen_state
-
-
 class AEVBState(NamedTuple):
     rec_params: ArrayLikeTree
     rec_state: ArrayLikeTree
@@ -143,6 +128,65 @@ class AEVBInfo(NamedTuple):
     kl: float
 
 
+from dataclasses import dataclass
+
+
+@dataclass
+class AEVBAlgorithmUtil:
+    latent_dim: int
+    # `apply` always takes in (params, state, input, train) and always returns the output and updated
+    # state. NOTE that state can be an empty dictionary if it is not needed.
+    rec_apply: Callable[
+        [ArrayLikeTree, ArrayLikeTree, ArrayLike, bool], tuple[ArrayTree, ArrayTree]
+    ]
+    gen_apply: Callable[
+        [ArrayLikeTree, ArrayLikeTree, ArrayLike, bool], tuple[ArrayTree, ArrayTree]
+    ]
+
+    # `rec_init` and `gen_init` either takes in (rng_key, input) in the case of flax or nothing in the case of equinox.
+    # It always returns a tuple of (params, state)
+    rec_init: (
+        Callable[[PRNGKey, ArrayLike], tuple[ArrayTree, ArrayTree]]
+        | Callable[[], tuple[ArrayTree, ArrayTree]]
+    ) = None
+    gen_init: (
+        Callable[[PRNGKey, ArrayLike], tuple[ArrayTree, ArrayTree]]
+        | Callable[[], tuple[ArrayTree, ArrayTree]]
+    ) = None
+
+    def sample_data(self, key: PRNGKey, aevb_state: AEVBState, n_samples: int):
+        z = jax.random.normal(key, shape=(n_samples, self.latent_dim))
+        return self.gen_apply(aevb_state.gen_params, aevb_state.state, z, train=False)
+
+    def encode(self, key: PRNGKey, aevb_state: AEVBState, x: ArrayLike, n_samples: int):
+        (z_mu, z_sigma), _ = self.rec_apply(
+            aevb_state.rec_params, aevb_state.rec_state, x, train=False
+        )
+        z_samples = reparameterized_sample(key, z_mu, z_sigma, n_samples)
+        return z_samples
+
+    def decode(self, aevb_state: AEVBState, z: ArrayLike):
+        x, _ = self.gen_apply(
+            aevb_state.gen_params, aevb_state.gen_state, z, train=False
+        )
+        return x
+
+
+@dataclass
+class AEVBAlgorithm:
+    # Either takes in (rng_key, input) in the case of flax or nothing in the case of equinox.
+    # It always returns a tuple of (params, state)
+    init: (
+        Callable[[PRNGKey, ArrayLike], tuple[ArrayTree, ArrayTree]]
+        | Callable[[], tuple[ArrayTree, ArrayTree]]
+    )
+
+    # Takes in an rng_key, a AEVBState, and data to return an updated AEVBState and AEVBInfo.
+    step: Callable[[PRNGKey, AEVBState, ArrayLike], tuple[AEVBState, AEVBInfo]]
+
+    util: AEVBAlgorithmUtil
+
+
 def AEVB(
     latent_dim: int,
     generative_apply: Callable,
@@ -150,44 +194,6 @@ def AEVB(
     optimizer: GradientTransformation,
     n_samples: int,
 ) -> tuple[Callable, Callable, Callable]:
-    """Create an `init_fn`, `step_fn`, and `sample_data_fn` for the
-    AEVB (auto-encoding variational bayes) inference algorithm. This
-    function should be called when the `apply` functions are already in
-    there necessary forms (see below). To construct the AEVB algorithm with flax/equinox
-    models, see `aevb.core.AEVB`.
-
-    NOTE: The `*_apply` callable inputs must have the following
-    signature:
-
-    def apply(params: ArrayLikeTree, state: ArrayLikeTree, input: Array, train: bool)
-        -> tuple[ArrayTree, ArrayTree]
-
-    That is, it takes in parameters, a mutable state, an input, and a train flag and returns
-    the output as well as the updated mutable state. The state can be an empty
-    dictionary {} when no mutable state is needed. The inputs are only used by keyword so
-    positioning is not important.
-
-    Args:
-        latent_dim (int): The dimension of the latent variable z.
-        generative_apply (Callable): The apply function for the generative model which maps
-        a latent variable z to a data point x. See above for more details on this above.
-        recognition_apply (Callable): The apply function for the recognition model which maps
-        a data point x to its latent variable z. See above for more details on this above.
-        optimizer (GradientTransformation): The optax optimizer for running gradient descent.
-        n_samples (int): The number of samples to take from q(z|x) for each step in the
-        inference algorithm.
-
-    Returns:
-        tuple[Callable, Callable, Callable]: Three functions.
-            1. An `init_fn`: this will output an AEVBState instance based on
-            the recognition/generative model's parameters and states.
-            2. A `step_fn`: this takes in an rng_key and an AEVBState instance as
-            well as a batch of data and return a new AEVBState instance and an
-            AEVBInfo instance after taking a step of inference (optimization).
-            3. A `sample_data_fn`: this samples datapoints x by sampling from a
-            N(0,1) distribution over the latent dimension and then using the
-            generative model to map these latent variable samples to data samples.
-    """
 
     gen_apply = generative_apply
     rec_apply = recognition_apply
@@ -237,20 +243,6 @@ def AEVB(
             new_rec_params, new_rec_state, new_gen_params, new_gen_state, new_opt_state
         ), AEVBInfo(loss_val, nll, kl)
 
-    @bind(jit, static_argnames=["n_samples"])
-    def sample_data_fn(rng_key, gen_params, gen_state, n_samples) -> ArrayLike:
-        """_summary_
+    util = AEVBAlgorithmUtil(latent_dim, rec_apply, gen_apply)
 
-        Args:
-            rng_key (_type_): _description_
-            gen_params (_type_): _description_
-            n_samples (_type_): _description_
-
-        Returns:
-            ArrayLike: _description_
-        """
-        return sample_data(
-            rng_key, gen_params, gen_state, gen_apply, n_samples, latent_dim
-        )
-
-    return init_fn, step_fn, sample_data_fn
+    return AEVBAlgorithm(init_fn, step_fn, util=util)

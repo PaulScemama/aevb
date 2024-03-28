@@ -1,11 +1,7 @@
-try:
-    import equinox as eqx
-except ModuleNotFoundError:
-    message = "Please install equinox to use equinox networks."
-
 import inspect
 from typing import Callable, List, Type
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as random
@@ -20,20 +16,14 @@ def batch_model(model):
         return jax.vmap(model, in_axes=(0, None), out_axes=(0, None))
 
 
-def init_apply_eqx_model(model_type: Type[eqx.Module], key: PRNGKey, **init_kwargs):
-    try:
-        import equinox as eqx
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("Please install equinox if you intend to use it.")
-
-    # Get `static` information from model for combining in `apply` later...
-    model, state = eqx.nn.make_with_state(model_type)(key, **init_kwargs)
+def init_apply_eqx_model(model: tuple):
+    model, state = model
     params, static = eqx.partition(model, eqx.is_inexact_array)
 
     def init():
         return params, state
 
-    def apply(*, params, state={}, input, train: bool):
+    def apply(params, state, input, train: bool):
         model = eqx.combine(params, static)
         if not train:
             model = eqx.nn.inference_mode(model)

@@ -1,24 +1,19 @@
-try:
-    import flax.linen as nn
-except ModuleNotFoundError:
-    message = "Please install flax to use flax networks."
-
-
 from typing import Callable, List
 
+import flax.linen as nn
 import jax.numpy as jnp
 
 
-def init_apply_flax_model(model: nn.Module):
+def init_apply_flax_model(model):
 
-    def init(rng_key, x):
-        variables = model.init(rng_key, x, train=False)
+    def init(rng_key, input):
+        variables = model.init(rng_key, input, train=False)
         params = variables["params"]
         state = {k: v for k, v in variables.items() if k != "params"}
         del variables
         return params, state
 
-    def apply(*, params, state={}, input, train: bool):
+    def apply(params, state, input, train: bool):
         out, updates = model.apply(
             {"params": params, **state}, input, train=train, mutable=list(state.keys())
         )

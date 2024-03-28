@@ -90,7 +90,7 @@ def main(save_samples_pth: str):
     rec_model = RecModel(latent_dim)
     optimizer = optax.adam(1e-3)
 
-    init, step, sample_data = AEVB(
+    engine = AEVB(
         latent_dim=latent_dim,
         generative_model=gen_model,
         recognition_model=rec_model,
@@ -101,26 +101,32 @@ def main(save_samples_pth: str):
 
     # Run AEVB
     key = PRNGKey(1242)
-    num_steps = 10000
+    num_steps = 1000
     eval_every = 100
 
     key, init_key = split(key)
-    state = init(init_key, X_train.shape[-1])
+    aevb_state = engine.init(init_key, X_train.shape[-1])
 
     key, *training_keys = split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):
         batch = next(batches)
-        state, info = step(rng_key, state, batch)
+        aevb_state, info = engine.step(rng_key, aevb_state, batch)
         if i % eval_every == 0:
             print(f"Step {i} | loss: {info.loss} | nll: {info.nll} | kl: {info.kl}")
 
     # Random Data Samples of Learned Generative Model
     key, data_samples_key = split(key)
-    samples, _ = sample_data(data_samples_key, state.gen_params, state.gen_state, 5)
+    x_samples = engine.util.sample_data(
+        data_samples_key, aevb_state.gen_params, aevb_state.gen_state, 5
+    )
     fig, axs = plt.subplots(5, 1)
-    for i, s in enumerate(samples):
+    for i, s in enumerate(x_samples):
         axs[i].imshow(s.reshape(28, 28))
     plt.savefig(save_samples_pth, format="png")
+
+    # Encode samples
+    z_samples = engine.util.encode(key, aevb_state, x_samples, n_samples=13)
+    print(z_samples.shape)
 
 
 if __name__ == "__main__":
