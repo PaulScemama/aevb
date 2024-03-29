@@ -56,6 +56,7 @@ def AEVB(
         aevb_algorithm = _AEVB(
             latent_dim, generative_model, recognition_model, optimizer, n_samples
         )
+        return aevb_algorithm
 
     if nn_lib == "flax":
         from aevb._src.flax_util import init_apply_flax_model

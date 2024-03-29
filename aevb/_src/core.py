@@ -1,11 +1,10 @@
-from functools import partial as bind
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Union
 
 import jax
 import jax.numpy as jnp
+import jax.random as random
 import optax
 from jax import jit
-from jax.random import PRNGKey
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
@@ -21,7 +20,7 @@ References:
 """
 
 
-def normal_like(rng_key: PRNGKey, tree: ArrayLikeTree, n_samples: int) -> ArrayTree:
+def normal_like(rng_key: random.key, tree: ArrayLikeTree, n_samples: int) -> ArrayTree:
     """Generate `n_samples` PyTree objects containing samples from a unit normal distribution."""
     treedef = tree_structure(tree)
     num_vars = len(tree_leaves(tree))
@@ -35,7 +34,7 @@ def normal_like(rng_key: PRNGKey, tree: ArrayLikeTree, n_samples: int) -> ArrayT
 
 
 def reparameterized_sample(
-    rng_key: PRNGKey, mu: ArrayLikeTree, sigma: ArrayLikeTree, n_samples: int
+    rng_key: random.key, mu: ArrayLikeTree, sigma: ArrayLikeTree, n_samples: int
 ) -> ArrayTree:
     """Compute a sample from a normal distribution using the reparameterization trick."""
     noise = normal_like(rng_key, mu, n_samples)
@@ -62,7 +61,7 @@ def unit_normal_kl(mu, sigma):
 
 
 def tractable_kl_step(
-    rng_key: PRNGKey,
+    rng_key: random.key,
     rec_params: ArrayLikeTree,
     rec_state: ArrayLikeTree,
     gen_params: ArrayLikeTree,
@@ -146,15 +145,15 @@ class AEVBAlgorithmUtil:
     # `rec_init` and `gen_init` either takes in (rng_key, input) in the case of flax or nothing in the case of equinox.
     # It always returns a tuple of (params, state)
     rec_init: (
-        Callable[[PRNGKey, ArrayLike], tuple[ArrayTree, ArrayTree]]
+        Callable[[random.key, ArrayLike], tuple[ArrayTree, ArrayTree]]
         | Callable[[], tuple[ArrayTree, ArrayTree]]
     ) = None
     gen_init: (
-        Callable[[PRNGKey, ArrayLike], tuple[ArrayTree, ArrayTree]]
+        Callable[[random.key, ArrayLike], tuple[ArrayTree, ArrayTree]]
         | Callable[[], tuple[ArrayTree, ArrayTree]]
     ) = None
 
-    def sample_data(self, key: PRNGKey, aevb_state: AEVBState, n_samples: int):
+    def sample_data(self, key: random.key, aevb_state: AEVBState, n_samples: int):
         z = jax.random.normal(key, shape=(n_samples, self.latent_dim))
         # Don't need to return state as it is not updated (train=False).
         x, _ = self.gen_apply(
@@ -162,7 +161,9 @@ class AEVBAlgorithmUtil:
         )
         return x
 
-    def encode(self, key: PRNGKey, aevb_state: AEVBState, x: ArrayLike, n_samples: int):
+    def encode(
+        self, key: random.key, aevb_state: AEVBState, x: ArrayLike, n_samples: int
+    ):
         # Don't need to return state as it is not updated (train=False).
         (z_mu, z_sigma), _ = self.rec_apply(
             aevb_state.rec_params, aevb_state.rec_state, x, train=False
@@ -183,12 +184,12 @@ class AEVBAlgorithm:
     # Either takes in (rng_key, input) in the case of flax or nothing in the case of equinox.
     # It always returns a tuple of (params, state)
     init: (
-        Callable[[PRNGKey, ArrayLike], tuple[ArrayTree, ArrayTree]]
+        Callable[[random.key, ArrayLike], tuple[ArrayTree, ArrayTree]]
         | Callable[[], tuple[ArrayTree, ArrayTree]]
     )
 
     # Takes in an rng_key, a AEVBState, and data to return an updated AEVBState and AEVBInfo.
-    step: Callable[[PRNGKey, AEVBState, ArrayLike], tuple[AEVBState, AEVBInfo]]
+    step: Callable[[random.key, AEVBState, ArrayLike], tuple[AEVBState, AEVBInfo]]
 
     util: AEVBAlgorithmUtil
 
@@ -210,12 +211,12 @@ def AEVB(
 
     @jit
     def step_fn(rng_key, aevb_state, x) -> tuple[AEVBState, AEVBInfo]:
-        """Take a step of Algorithm 1 from [1] using the second verison of the
+        """Take a step of Algorithm 1 from [1] using the second version of the
         SGVB estimator which takes advantage of an analytical KL term when the prior
         p(z) is a unit normal.
 
         Args:
-            rng_key (PRNGKey): Random number generator key.
+            rng_key (random.key): Random number generator key.
             rec_params (ArrayLikeTree): The current recognition model parameters.
             gen_params (ArrayLikeTree): The current generative model parameters.
             opt_state (ArrayLikeTree): The current optimizer state.

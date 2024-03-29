@@ -38,40 +38,56 @@ def data_stream(seed, data, batch_size, data_size):
 
 
 # Generative Model and Recognition Feature Extractor --------------------
-class GenModel(nn.Module):
-    @nn.compact
-    def __call__(self, x, train: bool = False):
-        x = nn.Dense(features=128)(x)
-        x = nn.BatchNorm(use_running_average=not train)(x)
-        x = nn.relu(x)
-        x = nn.Dense(features=256)(x)
-        x = nn.relu(x)
-        x = nn.Dense(784)(x)
-        return x
+def recognition_init(key, latent_dim, data_dim):
+    w1key, b1key, w2key, b2key, w3key, b3key = random.split(key, 6)
+
+    shared_W = random.normal(w1key, (data_dim, 100)) * 0.1
+    shared_b = random.normal(b1key, (100,)) * 0.1
+
+    mu_W = random.normal(w2key, (100, latent_dim)) * 0.1
+    mu_b = random.normal(b2key, (latent_dim,)) * 0.1
+
+    logvar_W = random.normal(w3key, (100, latent_dim)) * 0.1
+    logvar_b = random.normal(b3key, (latent_dim,)) * 0.1
+
+    return {
+        "shared": {"W": shared_W, "b": shared_b},
+        "mu": {"W": mu_W, "b": mu_b},
+        "logvar": {"W": logvar_W, "b": logvar_b},
+    }
 
 
-class RecModel(nn.Module):
-    latent_dim: int
+def recognition_apply(params, state, input, train):
+    x = jnp.dot(input, params["shared"]["W"]) + params["shared"]["b"]
+    x = jax.nn.relu(x)
+    mu = jnp.dot(x, params["mu"]["W"]) + params["mu"]["b"]
+    logvar = jnp.dot(x, params["logvar"]["W"]) + params["logvar"]["b"]
+    sigma = jnp.exp(logvar * 0.5)
+    return (mu, sigma), {}
 
-    @nn.compact
-    def __call__(self, x, train: bool = False):
-        x = nn.Dense(features=512)(x)
-        x = nn.BatchNorm(use_running_average=not train)(x)
-        x = nn.relu(x)
-        x = nn.Dense(features=256)(x)
-        x = nn.relu(x)
-        x = nn.Dense(features=128)(x)
-        x = nn.relu(x)
-        x = nn.Dense(features=64)(x)
-        mu = nn.Dense(features=self.latent_dim)(x)
-        logvar = nn.Dense(features=self.latent_dim)(x)
-        sigma = jnp.exp(logvar * 0.5)
-        return mu, sigma
+
+# recognition_apply = jax.vmap(recognition_apply, in_axes=(None, None, 0, None))
+
+
+def generative_init(key, latent_dim, data_dim):
+    wkey, bkey = random.split(key)
+    W = random.normal(wkey, (latent_dim, data_dim)) * 0.1
+    b = random.normal(bkey, (data_dim,)) * 0.1
+    return W, b
+
+
+def generative_apply(params, state, input, train: bool):
+    W, b = params
+    pre = jnp.dot(input, W) + b
+    out = jax.nn.relu(pre)
+    return out, {}
+
+
+# generative_apply = jax.vmap(generative_apply, in_axes=(None, None, 0, None))
 
 
 # Main Function --------------------------------
 def main(save_samples_pth: str):
-
     # Prepare Data
     mnist_data = load_dataset("mnist")
     data_train = mnist_data["train"]
@@ -81,31 +97,32 @@ def main(save_samples_pth: str):
 
     seed = 1
     n = N_train.item()
-    batch_size = 100
+    batch_size = 500
     batches = data_stream(seed, X_train, batch_size, n)
 
-    # Create AEVB inference engine
+    data_dim = 784
     latent_dim = 4
-    gen_model = GenModel()
-    rec_model = RecModel(latent_dim)
     optimizer = optax.adam(1e-3)
 
     engine = AEVB(
-        latent_dim=latent_dim,
-        generative_model=gen_model,
-        recognition_model=rec_model,
+        latent_dim=4,
+        generative_model=generative_apply,
+        recognition_model=recognition_apply,
         optimizer=optimizer,
         n_samples=15,
-        nn_lib="flax",
     )
+    state = {}
+
+    rec_params = recognition_init(random.key(0), latent_dim, data_dim)
+    gen_params = generative_init(random.key(1), latent_dim, data_dim)
 
     # Run AEVB
     key = random.key(1242)
-    num_steps = 1000
+    num_steps = 5000
     eval_every = 100
 
     key, init_key = random.split(key)
-    aevb_state = engine.init(init_key, X_train.shape[-1])
+    aevb_state = engine.init(rec_params, state, gen_params, state)
 
     key, *training_keys = random.split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):

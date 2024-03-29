@@ -152,7 +152,7 @@ def main(save_samples_pth: str):
     x_samples = engine.util.sample_data(data_samples_key, aevb_state, n_samples=5)
 
     # Encode/Decode samples using Learned Recognition and Generative Models
-    key, encode_key, decode_key = split(key, 3)
+    key, encode_key = split(key)
     z_samples = engine.util.encode(encode_key, aevb_state, x_samples, n_samples=30)
     z_means = z_samples.mean(axis=0)
     x_recon = engine.util.decode(aevb_state, z_means)
