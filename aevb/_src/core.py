@@ -8,6 +8,7 @@ from jax import jit
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
+from dataclasses import dataclass
 
 ArrayTree = Union[jax.Array, Iterable["ArrayTree"], Mapping[Any, "ArrayTree"]]
 ArrayLikeTree = Union[
@@ -127,7 +128,6 @@ class AEVBInfo(NamedTuple):
     kl: float
 
 
-from dataclasses import dataclass
 
 
 @dataclass

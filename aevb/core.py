@@ -53,6 +53,8 @@ def AEVB(
     if nn_lib is None:
         # -- GENERAL APPLY FUNCTIONS --
         # Just return the out of the core implementation: aevb._src.core.AEVB
+        for model in [generative_model, recognition_model]:
+            assert isinstance(model, Callable), "Setting nn_lib=None means the generative and recognition models must be callables."
         aevb_algorithm = _AEVB(
             latent_dim, generative_model, recognition_model, optimizer, n_samples
         )
@@ -60,9 +62,12 @@ def AEVB(
 
     if nn_lib == "flax":
         from aevb._src.flax_util import init_apply_flax_model
+        from flax.linen import Module
+        
 
         # Make sure latent dim matches
         for model in [generative_model, recognition_model]:
+            assert isinstance(model, Module), "Setting nn_lib='flax' means the generative and recognition models must be flax.linen.Module instances"
             latent_dim_check(model, latent_dim)
 
         # -- FLAX MODULES --
@@ -97,11 +102,12 @@ def AEVB(
 
     if nn_lib == "equinox":
         from aevb._src.eqx_util import init_apply_eqx_model
-
+        from equinox.nn import Module
         # -- EQUINOX MODULES --
         # Make sure latent dim matches
         for model in [generative_model, recognition_model]:
             latent_dim_check(model[0], latent_dim)
+            assert isinstance(model, Module), "Setting nn_lib='equinox' means the generative and recognition models must be equinox.linen.Module instances"
 
         # [Step 1]
         # Convert the `Module` instance into an init and an apply function for
