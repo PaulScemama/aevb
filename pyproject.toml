@@ -17,7 +17,7 @@ examples = ["matplotlib", "datasets"]
 
 
 [tool.setuptools.packages.find]
-include = ["aevb", "aevb.*]
+include = ["aevb", "aevb.*"]
 exclude = ["tests*", "build*", "dist*", "notebooks*", "examples*"]
 
 [tool.setuptools.dynamic]
