@@ -10,7 +10,7 @@ from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
 
-from aevb._src.util import check_package_decorator as check_package
+from aevb._src.util import package_available
 
 ArrayTree = Union[jax.Array, Iterable["ArrayTree"], Mapping[Any, "ArrayTree"]]
 ArrayLikeTree = Union[
@@ -276,7 +276,7 @@ def setup_from_callable(
     return AEVBAlgorithm(init_fn, step_fn, util)
 
 
-@check_package("flax")
+
 def setup_from_flax_module(
     latent_dim: int,
     generative_model: object,
@@ -284,8 +284,8 @@ def setup_from_flax_module(
     optimizer: GradientTransformation,
     n_samples: int,
 ):
+    package_available("flax", fn=setup_from_flax_module)
     from flax.linen import Module
-
     from aevb._src.flax_util import init_apply_flax_model
 
     # Make sure latent dim matches
@@ -309,7 +309,7 @@ def setup_from_flax_module(
     return AEVBAlgorithm(init_fn, step_fn, util)
 
 
-@check_package("equinox")
+
 def setup_from_equinox_module(
     latent_dim: int,
     generative_model: object,
@@ -317,8 +317,8 @@ def setup_from_equinox_module(
     optimizer: GradientTransformation,
     n_samples: int,
 ):
+    package_available("equinox", fn=setup_from_flax_module)
     from equinox.nn._stateful import State
-
     from aevb._src.equinox_util import init_apply_eqx_model
 
     for model in [generative_model, recognition_model]:

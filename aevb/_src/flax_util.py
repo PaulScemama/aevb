@@ -1,6 +1,6 @@
-from aevb._src.util import check_package
+from aevb._src.util import package_available
+package_available("flax", file=__file__)
 
-check_package(__file__, "flax")
 
 from typing import Callable, List
 

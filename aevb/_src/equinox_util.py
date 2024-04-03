@@ -1,6 +1,5 @@
-from aevb._src.util import check_package
-
-check_package(__file__, "equinox")
+from aevb._src.util import package_available
+package_available("equinox", file=__file__)
 
 import inspect
 from typing import Any, Callable, List
