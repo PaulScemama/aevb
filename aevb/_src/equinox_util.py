@@ -1,5 +1,9 @@
+from aevb._src.util import check_package
+
+check_package(__file__, "equinox")
+
 import inspect
-from typing import Callable, List, Type
+from typing import Any, Callable, List
 
 import equinox as eqx
 import jax
@@ -7,8 +11,10 @@ import jax.numpy as jnp
 import jax.random as random
 from jax.random import PRNGKey
 
+State = eqx.nn._stateful.State
 
-def batch_model(model):
+
+def batch_model(model: eqx.Module) -> Callable:
     if "BatchNorm" in inspect.getsource(model.__init__):
         # see BatchNorm: https://docs.kidger.site/equinox/api/nn/normalisation/
         return jax.vmap(model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")
@@ -16,7 +22,7 @@ def batch_model(model):
         return jax.vmap(model, in_axes=(0, None), out_axes=(0, None))
 
 
-def init_apply_eqx_model(model: tuple):
+def init_apply_eqx_model(model: tuple[Any, State]) -> tuple[Callable, Callable]:
     model, state = model
     params, static = eqx.partition(model, eqx.is_inexact_array)
 
@@ -34,16 +40,15 @@ def init_apply_eqx_model(model: tuple):
     return init, apply
 
 
-class EqxMLPEncoder(eqx.Module):
+@eqx.nn.make_with_state
+class EncMLP(eqx.Module):
 
     in_dim: int
     latent_dim: int
     hidden: List[int]
-    activation: Callable
+    norm: tuple[Callable, List[int]]
+    activation: tuple[Callable, List[int]]
 
-    def __post_init__(self, rng_key: PRNGKey): ...
-
-    # @bind(vmap, in_axes=[None, None, 0])
     def __call__(self, key: PRNGKey, x: jnp.array):
         keys = random.split(key, len(self.hidden) + 1)
         x = eqx.nn.Linear(self.in_dim, self.hidden[0], key=keys[0])(x)
@@ -65,14 +70,15 @@ class EqxMLPEncoder(eqx.Module):
         return mu, sigma
 
 
-class EqxMLPDecoder(eqx.Module):
+@eqx.nn.make_with_state
+class DecMLP(eqx.Module):
 
     out_dim: int
     latent_dim: int
     hidden: List[int]
-    activation: Callable
+    norm: tuple[Callable, List[int]]
+    activation: tuple[Callable, List[int]]
 
-    # @bind(vmap, in_axes=[None, None, 0])
     def __call__(self, key, x):
         keys = random.split(key, len(self.hidden))
         x = eqx.nn.Linear(self.latent_dim, self.hidden[0], key=keys[0])(x)

@@ -1,0 +1,40 @@
+
+
+seed: 0
+nn_lib: flax
+
+
+jax:
+  gpus: [0,]
+
+
+run:
+  update_steps: 10000
+  eval_every: 100
+
+models:
+  data_shape: [28, 28]
+  latent_dim: 4
+
+  gen_type: mlp
+  gen_hidden: [128, 256]
+  gen_norm: 
+  gen_act: 
+
+  rec_type: mlp
+  rec_hidden: [512, 256, 128, 64]
+  rec_norm: 
+  rec_act: 
+
+  init: {init: glorot_normal, params: None}
+  opt: {opt: adam, lr: 1e-3}
+
+
+
+# mnist:
+#   init: {init: normal, params: [0.0, 0.01]}
+#   opt: {opt: adagrad, lr: 1e-1}
+
+
+# small:
+#   {gen_hidden: [128, 784], rec_hidden: [128, 64]}

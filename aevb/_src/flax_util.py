@@ -1,3 +1,7 @@
+from aevb._src.util import check_package
+
+check_package(__file__, "flax")
+
 from typing import Callable, List
 
 import flax.linen as nn
@@ -22,7 +26,7 @@ def init_apply_flax_model(model):
     return init, apply
 
 
-class FlaxMLPEncoder(nn.Module):
+class EncMLP(nn.Module):
     latent_dim: int
     hidden: List[int]
     activation: Callable
@@ -40,7 +44,7 @@ class FlaxMLPEncoder(nn.Module):
         return mu, sigma
 
 
-class FlaxMLPDecoder(nn.Module):
+class DecMLP(nn.Module):
     out_dim: int
     hidden: List[int]
     activation: Callable

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Union
 
 import jax
@@ -8,7 +9,8 @@ from jax import jit
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
-from dataclasses import dataclass
+
+from aevb._src.util import check_package_decorator as check_package
 
 ArrayTree = Union[jax.Array, Iterable["ArrayTree"], Mapping[Any, "ArrayTree"]]
 ArrayLikeTree = Union[
@@ -114,7 +116,6 @@ def tractable_kl_step(
     ), (loss_val, nll, kl)
 
 
-
 # --- Types used in interface --- #
 class AEVBState(NamedTuple):
     rec_params: ArrayLikeTree
@@ -141,7 +142,6 @@ class AEVBAlgorithmUtil:
     rec_apply: Callable[
         [ArrayLikeTree, ArrayLikeTree, ArrayLike, bool], tuple[ArrayTree, ArrayTree]
     ]
-
 
     # `rec_init` and `gen_init` either takes in (rng_key, input) in the case of flax or nothing in the case of equinox.
     # It always returns a tuple of (params, state)
@@ -195,8 +195,6 @@ class AEVBAlgorithm:
     util: AEVBAlgorithmUtil
 
 
-
-
 # --- Functions used to interface with core functionality --- #
 def latent_dim_check(model, latent_dim):
     if "latent_dim" in model.__annotations__.keys():
@@ -205,7 +203,6 @@ def latent_dim_check(model, latent_dim):
         ), f"""
                     latent_dim value passed to AEVB() does not match attribute of {model}. 
                         These need to match."""
-
 
 
 def make_step_fn(
@@ -258,7 +255,6 @@ def make_step_fn(
     return step_fn
 
 
-
 def setup_from_callable(
     latent_dim: int,
     gen_apply: Callable,
@@ -267,7 +263,9 @@ def setup_from_callable(
     n_samples: int,
 ):
     for model in [gen_apply, rec_apply]:
-        assert isinstance(model, Callable), "Setting nn_lib=None means the generative and recognition models must be callables."
+        assert isinstance(
+            model, Callable
+        ), "Setting nn_lib=None means the generative and recognition models must be callables."
 
     def init_fn(rec_params, rec_state, gen_params, gen_state) -> AEVBState:
         opt_state = optimizer.init((rec_params, gen_params))
@@ -277,6 +275,8 @@ def setup_from_callable(
     util = AEVBAlgorithmUtil(latent_dim, gen_apply, rec_apply, optimizer, n_samples)
     return AEVBAlgorithm(init_fn, step_fn, util)
 
+
+@check_package("flax")
 def setup_from_flax_module(
     latent_dim: int,
     generative_model: object,
@@ -284,13 +284,15 @@ def setup_from_flax_module(
     optimizer: GradientTransformation,
     n_samples: int,
 ):
-    from aevb._src.flax_util import init_apply_flax_model
     from flax.linen import Module
-    
+
+    from aevb._src.flax_util import init_apply_flax_model
 
     # Make sure latent dim matches
     for model in [generative_model, recognition_model]:
-        assert isinstance(model, Module), "Setting nn_lib='flax' means the generative and recognition models must be flax.linen.Module instances"
+        assert isinstance(
+            model, Module
+        ), "Setting nn_lib='flax' means the generative and recognition models must be flax.linen.Module instances"
         latent_dim_check(model, latent_dim)
 
     gen_init, gen_apply = init_apply_flax_model(generative_model)
@@ -301,12 +303,13 @@ def setup_from_flax_module(
         (rec_params, rec_state) = rec_init(rng_key, jnp.ones((1, data_dim)))
         opt_state = optimizer.init((rec_params, gen_params))
         return AEVBState(rec_params, rec_state, gen_params, gen_state, opt_state)
-    
+
     step_fn = make_step_fn(gen_apply, rec_apply, optimizer, n_samples)
     util = AEVBAlgorithmUtil(latent_dim, gen_apply, rec_apply, optimizer, n_samples)
     return AEVBAlgorithm(init_fn, step_fn, util)
 
 
+@check_package("equinox")
 def setup_from_equinox_module(
     latent_dim: int,
     generative_model: object,
@@ -314,22 +317,25 @@ def setup_from_equinox_module(
     optimizer: GradientTransformation,
     n_samples: int,
 ):
-    from aevb._src.eqx_util import init_apply_eqx_model
     from equinox.nn._stateful import State
+
+    from aevb._src.equinox_util import init_apply_eqx_model
 
     for model in [generative_model, recognition_model]:
         latent_dim_check(model[0], latent_dim)
-        assert isinstance(model[1], State), "Setting nn_lib='equinox' means the generative and recognition models must be the result of calling eqx.nn.make_with_state on an eqx.Module."
+        assert isinstance(
+            model[1], State
+        ), "Setting nn_lib='equinox' means the generative and recognition models must be the result of calling eqx.nn.make_with_state on an eqx.Module."
 
     gen_init, gen_apply = init_apply_eqx_model(generative_model)
     rec_init, rec_apply = init_apply_eqx_model(recognition_model)
-    
+
     def init_fn() -> AEVBState:
         (gen_params, gen_state) = gen_init()
         (rec_params, rec_state) = rec_init()
         opt_state = optimizer.init((rec_params, gen_params))
         return AEVBState(rec_params, rec_state, gen_params, gen_state, opt_state)
-    
+
     step_fn = make_step_fn(gen_apply, rec_apply, optimizer, n_samples)
     util = AEVBAlgorithmUtil(latent_dim, gen_apply, rec_apply, optimizer, n_samples)
     return AEVBAlgorithm(init_fn, step_fn, util)
@@ -356,19 +362,22 @@ def AEVB(
                 train: bool) -> (output: Any, state: ArrayLikeTree)
             """
         )
-    
+
     if nn_lib is None:
         gen_apply, rec_apply = generative_model, recognition_model
-        return setup_from_callable(latent_dim, gen_apply, rec_apply, optimizer, n_samples)
-    
+        return setup_from_callable(
+            latent_dim, gen_apply, rec_apply, optimizer, n_samples
+        )
+
     if nn_lib == "flax":
-        return setup_from_flax_module(latent_dim, generative_model, recognition_model, optimizer, n_samples)
-    
+        return setup_from_flax_module(
+            latent_dim, generative_model, recognition_model, optimizer, n_samples
+        )
+
     if nn_lib == "equinox":
-        return setup_from_equinox_module(latent_dim, generative_model, recognition_model, optimizer, n_samples)
-    
+        return setup_from_equinox_module(
+            latent_dim, generative_model, recognition_model, optimizer, n_samples
+        )
+
     else:
         raise ValueError("No nn_lib conditional case was hit...")
-    
-
-
