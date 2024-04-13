@@ -48,12 +48,12 @@ In order to use `aevb`, the user must define...
 
 1. `latent_dim`: the dimension of the latent variable $z$. 
 2. `data_dim`: the dimension of the data $x$. 
-3. A `gen_prior`: the logpdf function of a prior distribution over continuous latent variable $z$. 
-4. A `gen_obs_dist`: the logpdf function of a distribution over the data $x$. 
-5. A `gen_apply`: a function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`. 
-6. A `rec_dist`: the logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$. 
-7. A `rec_apply`: a function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`. 
-8. An `optimizer`: an `optax` optimizer.
+3. `gen_prior`: the logpdf function of a prior distribution over continuous latent variable $z$. 
+4. `gen_obs_dist`: the logpdf function of a distribution over the data $x$. 
+5. `gen_apply`: a function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`. 
+6. `rec_dist`: the logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$. 
+7. `rec_apply`: a function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`. 
+8. `optimizer`: an `optax` optimizer.
 9. `n_samples`: the number of samples to take from the reparameterized sample function of `rec_dist` during one step of optimization. 
 
 An example using `jax` functions for `gen_apply` and `rec_apply` are given in `examples/jax/`.
