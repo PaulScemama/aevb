@@ -27,9 +27,9 @@ def init_apply_eqx_model(model: tuple[Any, State]) -> tuple[Callable, Callable]:
 
     def apply(params, state, input, train: bool):
         model = eqx.combine(params, static)
+        batched_model = batch_model(model)
         if not train:
             model = eqx.nn.inference_mode(model)
-        batched_model = batch_model(model)
         out, updates = batched_model(input, state)
         return out, updates
 

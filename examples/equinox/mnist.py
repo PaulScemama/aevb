@@ -139,7 +139,7 @@ def main(save_samples_pth: str):
     )
     # Run AEVB
     key = random.key(123)
-    num_steps = 1000
+    num_steps = 3000
     eval_every = 100
 
     aevb_state = engine.init()
