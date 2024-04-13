@@ -39,6 +39,48 @@ $$
 I often refer to $f_{\phi}$ as the "encoder". 
 
 
+## How To Use
+
+In order to use `aevb`, the user must define...
+
+1. `latent_dim`: the dimension of the latent variable $z$. 
+2. `data_dim`: the dimension of the data $x$. 
+3. A `gen_prior`: the logpdf function of a prior distribution over continuous latent variable $z$. 
+4. A `gen_obs_dist`: the logpdf function of a distribution over the data $x$. 
+5. A `gen_apply`: a function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`. 
+6. A `rec_dist`: the logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$. 
+7. A `rec_apply`: a function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`. 
+8. An `optimizer`: an `optax` optimizer.
+9. `n_samples`: the number of samples to take from the reparameterized sample function of `rec_dist` during one step of optimization. 
+
+An example using `jax` functions for `gen_apply` and `rec_apply` are given in `examples/jax/`.
+
+> Note: there is builtin support for distributions. For example, one can pass in the string `'unit_normal'` as `gen_prior`; or one can pass in the string `'normal'` as `gen_obs_dist` or `rec_dist`. 
+
+The signature of `gen_apply` and `rec_apply` must be the following: 
+
+```python
+(params: ArrayLikeTree, state: ArrayLikeTree, input: ArrayLike, train: bool) -> Dict[str, ArrayLike]
+```
+
+In words, the `apply` methods take in learnable parameters, a learnable state (if none is required, pass in an empty dictionary `{}`), input data, and a boolean flag indicating whether this is being used during training of the learnable components passed in. The output of `gen_apply` and `rec_apply` must output dictionaries where the keys are the keyword arguments for the `gen_obs_dist` logpdf and `rec_dist` logpdf, respectively. 
+
+When the components listed above are passed to the `AevbEngine` contructor, two main functions are then available for the user.
+
+1. An `init` function. This takes in the learnable parameters (and possibly learnable state) and returns an `AevbState` object, which contains the learnable parameters (and possibly learnable state) and an optimization state.
+2. A `step` function. This takes in a `random.key`, an `AEVBState`, and a batch of data `x`, and returns an updated `AEVBState` after one step of optimization. 
+
+Other objects are available to the user from the `AevbEngine` as well. Look at `aevb._src.aevb.AevbEngine` for more information. 
+
+While the above 'user inputs' list contains the *required* inputs needed to create an `aevb` inference engine, a user may want to pass in higher-level objects (e.g. Flax or Equinox modules). The following sections demonstrate how to do this, and what changes about the properties of the `aevb` inference engine. 
+
+### Using Flax Modules for Encoder/Decoder
+
+
+### Using Equinox Modules for Encoder/Decoder
+
+
+### Using Haiku Modules for Encoder/Decoder
 
 
 
