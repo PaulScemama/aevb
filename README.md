@@ -5,17 +5,20 @@ Applying the AEVB Estimator to Latent Variable Models
 
 The purpose of this package is to provide a simple (but general) implementation of the Auto-Encoding Variational Bayes (AEVB) inference algorithm ([Kingma et. al, 2014](https://arxiv.org/abs/1312.6114)) as well as a composable and interoperable interface for the implementation.
 
-
+### Interoperability
 - [x] Arbitrary `apply` callables for the encoder/decoder mappings.
-- [ ] Arbitrary `init` and `apply` callables for the initialization and encoder/decoder mappings.
 - [x] Flax modules for the initialization and encoder/decoder mappings.
 - [x] Equinox modules for the initialization and encoder/decoder mappings.
-- [ ] Haiku modules for the initialization encoder/decoder mappings.
-- [x] Reparameterization trick support for loc/scale families.
-- [ ] Reparameterization trick support for tractable inverse CDF families.
-- [ ] Reparameterization trick support for composable families.
+- [ ] Haiku modules for the initialization and encoder/decoder mappings.
+
+### Gradient Estimator Support
+- [x] Reparameterization trick support for loc/scale distribution families.
+- [ ] Reparameterization trick support for tractable inverse CDF distribution families.
+- [ ] Reparameterization trick support for composable distribution families.
 - [ ] REINFORCE estimator support.
-- [x] Support for analytical KL term for normal/normal prior and recognition model distribution. 
+
+### KL Support
+- [x] Support for analytical KL term for normal prior and normal recognition model distribution. 
 - [ ] Support for analytical KL term for other prior and recognition model distributions.
 - [ ] Support for intractable KL term.
 
