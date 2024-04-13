@@ -1,7 +1,3 @@
-from aevb._src.util import package_available
-package_available("flax", file=__file__)
-
-
 from typing import Callable, List
 
 import flax.linen as nn

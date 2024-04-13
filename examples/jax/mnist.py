@@ -6,7 +6,8 @@ import numpy as np
 import optax
 from datasets import load_dataset
 
-from aevb.core import AEVB
+from aevb.aevb import AevbEngine, AevbState
+from aevb._src.types import ArrayLike
 
 
 # Data Processing Functions ----------------------------------
@@ -49,11 +50,13 @@ def recognition_init(key, latent_dim, data_dim):
     logvar_W = random.normal(w3key, (100, latent_dim)) * 0.1
     logvar_b = random.normal(b3key, (latent_dim,)) * 0.1
 
-    return {
-        "shared": {"W": shared_W, "b": shared_b},
-        "mu": {"W": mu_W, "b": mu_b},
-        "logvar": {"W": logvar_W, "b": logvar_b},
-    }
+    return (
+        {
+            "shared": {"W": shared_W, "b": shared_b},
+            "mu": {"W": mu_W, "b": mu_b},
+            "logvar": {"W": logvar_W, "b": logvar_b},
+        }
+    ), {}
 
 
 def recognition_apply(params, state, input, train):
@@ -62,27 +65,21 @@ def recognition_apply(params, state, input, train):
     mu = jnp.dot(x, params["mu"]["W"]) + params["mu"]["b"]
     logvar = jnp.dot(x, params["logvar"]["W"]) + params["logvar"]["b"]
     sigma = jnp.exp(logvar * 0.5)
-    return (mu, sigma), {}
-
-
-# recognition_apply = jax.vmap(recognition_apply, in_axes=(None, None, 0, None))
+    return {"loc": mu, "scale": sigma}, {}
 
 
 def generative_init(key, latent_dim, data_dim):
     wkey, bkey = random.split(key)
     W = random.normal(wkey, (latent_dim, data_dim)) * 0.1
     b = random.normal(bkey, (data_dim,)) * 0.1
-    return W, b
+    return {"w": W, "b": b}, {}
 
 
 def generative_apply(params, state, input, train: bool):
-    W, b = params
+    W, b = params["w"], params["b"]
     pre = jnp.dot(input, W) + b
     out = jax.nn.relu(pre)
-    return out, {}
-
-
-# generative_apply = jax.vmap(generative_apply, in_axes=(None, None, 0, None))
+    return {"loc": out, "scale": 0.1}, {}
 
 
 # Main Function --------------------------------
@@ -103,42 +100,74 @@ def main(save_samples_pth: str):
     latent_dim = 4
     optimizer = optax.adam(1e-3)
 
-    engine = AEVB(
-        latent_dim=4,
-        generative_model=generative_apply,
-        recognition_model=recognition_apply,
-        optimizer=optimizer,
-        n_samples=15,
-    )
-    state = {}
+    rec_params, rec_state = recognition_init(random.key(0), latent_dim, data_dim)
+    gen_params, gen_state = generative_init(random.key(1), latent_dim, data_dim)
 
-    rec_params = recognition_init(random.key(0), latent_dim, data_dim)
-    gen_params = generative_init(random.key(1), latent_dim, data_dim)
+    engine = AevbEngine.from_applys(
+        latent_dim=latent_dim,
+        data_dim=data_dim,
+        gen_prior="unit_normal",
+        gen_obs_dist="normal",
+        gen_apply=generative_apply,
+        rec_dist="normal",
+        rec_apply=recognition_apply,
+        optimizer=optimizer,
+        n_samples=1,
+    )
 
     # Run AEVB
     key = random.key(1242)
     num_steps = 5000
     eval_every = 100
 
-    key, init_key = random.split(key)
-    aevb_state = engine.init(rec_params, state, gen_params, state)
+    aevb_state = engine.init(rec_params, rec_state, gen_params, gen_state)
 
     key, *training_keys = random.split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):
         batch = next(batches)
-        aevb_state, info = engine.step(rng_key, aevb_state, batch)
+        aevb_state, info = jax.jit(engine.step)(rng_key, aevb_state, batch)
         if i % eval_every == 0:
             print(f"Step {i} | loss: {info.loss} | nll: {info.nll} | kl: {info.kl}")
 
     # Random Data Samples of Learned Generative Model
+    def generate_random_samples(key: random.key, aevb_engine: AevbEngine, aevb_state: AevbState, n_samples: int):
+        z_key, x_key = random.split(key)
+        if aevb_engine.gen_model.prior.sample is not None:
+            prior_zs = aevb_engine.gen_model.prior.sample(z_key, shape=(n_samples, latent_dim))
+        else:
+            # defer to N(0, 1)
+            prior_zs = jax.random.normal(z_key, shape=(n_samples, aevb_engine.latent_dim))
+        
+        x_params, _ = aevb_engine.gen_model.apply(aevb_state.gen_params, aevb_state.gen_state, prior_zs, train=False)
+
+        if aevb_engine.gen_model.obs_dist.sample is not None:
+            xs = aevb_engine.gen_model.obs_dist.sample(x_key, **x_params, shape=())
+            return xs
+        else:
+            return x_params
+        
     key, data_samples_key = random.split(key)
-    x_samples = engine.util.sample_data(data_samples_key, aevb_state, n_samples=5)
+    x_samples = generate_random_samples(data_samples_key, engine, aevb_state, n_samples=5)
 
     # Encode/Decode samples using Learned Recognition and Generative Models
-    key, encode_key = random.split(key)
-    z_samples = engine.util.encode(encode_key, aevb_state, x_samples, n_samples=30)
+    def encode(key: random.key, aevb_engine: AevbEngine, aevb_state: AevbState, x: ArrayLike, n_samples: int):
+        rec_model = aevb_engine.rec_model
+        z_params, _ = rec_model.apply(aevb_state.rec_params, aevb_state.rec_state, x, train=False)
+        return rec_model.dist.reparam_sample(key, **z_params, n_samples=n_samples)
+    
+    def decode(key: random.key, aevb_engine: AevbEngine, aevb_state: AevbEngine, z: ArrayLike, n_samples: int):
+        x_params, _ = aevb_engine.gen_model.apply(aevb_state.gen_params, aevb_state.gen_state, z, train=False)
+        if aevb_engine.gen_model.obs_dist.sample is not None:
+            xs = aevb_engine.gen_model.obs_dist.sample(key, **x_params, shape=(n_samples,))
+            return xs
+        else:
+            return x_params
+        
+    key, encode_key, decode_key = random.split(key, 3)
+    z_samples = encode(encode_key, engine, aevb_state, x_samples, n_samples=30)
     z_means = z_samples.mean(axis=0)
-    x_recon = engine.util.decode(aevb_state, z_means)
+    x_recon = decode(decode_key, engine, aevb_state, z_means, n_samples=1)
+
 
     fig, axs = plt.subplots(2, 5)
     for i, s in enumerate(x_samples):
