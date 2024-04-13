@@ -254,6 +254,7 @@ def _setup_init_step_from_flax_inits_applys(
     rec_init,
     rec_apply,
     latent_dim,
+    data_dim,
     gen_logpdf,
     rec_dist,
     kl_fn,
@@ -261,7 +262,7 @@ def _setup_init_step_from_flax_inits_applys(
     n_samples,
 ):
 
-    def init_fn(rng_key, data_dim) -> AevbState:
+    def init_fn(rng_key) -> AevbState:
         (gen_params, gen_state) = gen_init(rng_key, jnp.ones((1, latent_dim)))
         (rec_params, rec_state) = rec_init(rng_key, jnp.ones((1, data_dim)))
         opt_state = optimizer.init((rec_params, gen_params))
@@ -409,6 +410,7 @@ class AevbEngine:
             rec_init=rec_init,
             rec_apply=rec_apply,
             latent_dim=latent_dim,
+            data_dim=data_dim,
             gen_logpdf=gen_obs_dist.logpdf,
             rec_dist=rec_dist,
             kl_fn=kl_fn,

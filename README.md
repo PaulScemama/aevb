@@ -63,7 +63,7 @@ The signature of `gen_apply` and `rec_apply` must be the following:
 (params: ArrayLikeTree, state: ArrayLikeTree, input: ArrayLike, train: bool) -> Dict[str, ArrayLike]
 ```
 
-In words, the `apply` methods take in learnable parameters, a learnable state (if none is required, pass in an empty dictionary `{}`), input data, and a boolean flag indicating whether this is being used during training of the learnable components passed in. The output of `gen_apply` and `rec_apply` must output dictionaries where the keys are the keyword arguments for the `gen_obs_dist` logpdf and `rec_dist` logpdf, respectively. 
+In words, the `apply` methods take in learnable parameters, a learnable state (if none is required, pass in an empty dictionary `{}`), input data, and a boolean flag indicating whether this is being used during training of the learnable components passed in. The output of `gen_apply` and `rec_apply` must output dictionaries where the keys are the keyword arguments for the `gen_obs_dist` logpdf and `rec_dist` logpdf and reparameterized sample, respectively. 
 
 When the components listed above are passed to the `AevbEngine` contructor, two main functions are then available for the user.
 
@@ -76,6 +76,48 @@ While the above 'user inputs' list contains the *required* inputs needed to crea
 
 ### Using Flax Modules for Encoder/Decoder
 
+You can pass in `flax` modules in place of `gen_apply` and `rec_apply`. Why would you want to do this? You can initialize the first `AevbState` with `AevbEngine.init(key: random.key)` instead of having to initialize the parameters and state for the encoder/decoder and then pass that into `AevbEngine.init`. You also don't need to explicitly create the `apply` functions of the encoder/decoder modules. 
+
+Here's an example of what this may look like
+
+```python
+import jax
+import jax.numpy as jnp
+import jax.random as random
+import flax.linen as nn
+
+class Encoder(nn.Module):
+
+    @nn.compact
+    def __call__(self, x, train: bool = False):
+        x = nn.Dense(5)(x)
+        x = nn.BatchNorm(use_running_average=not train)(x)
+        x = nn.relu(x)
+        # rec_dist is of the loc/scale family. Here we fix
+        # the `scale` parameter and only learn how to construct `loc`. 
+        return {"loc": x, "scale": jnp.ones_like(x)}
+
+class Decoder(nn.Module):
+    
+    @nn.compact
+    def __call__(self, x, train: bool = False)
+        x = nn.Dense(25)(x)
+        x = nn.relu(x)
+        # gen_obs_dist is of the loc/scale family. Here we fix
+        # the `scale` parameter and only learn how to construct `loc`. 
+        return {"loc": x, "scale": jnp.ones_like(x)} 
+
+encoder = Encoder()
+decoder = Decoder()
+
+engine = AevbEngine.from_flax_modules(
+    ...
+    gen_module=decoder,
+    rec_moodule=encoder,
+)
+
+aevb_state = engine.init(random.key(1))
+```
 
 ### Using Equinox Modules for Encoder/Decoder
 
