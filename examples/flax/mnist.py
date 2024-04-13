@@ -8,7 +8,7 @@ import optax
 from datasets import load_dataset
 
 from aevb.aevb import AevbEngine, AevbState
-from aevb._src.types import ArrayLike
+from aevb.types import ArrayLike
 
 
 # Data Processing Functions ----------------------------------
