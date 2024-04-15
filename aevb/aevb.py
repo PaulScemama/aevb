@@ -1,1 +1,2 @@
-from aevb._src.aevb import AevbEngine, AevbState, AevbRecModel, AevbGenModel, AevbInfo
+from aevb._src.aevb import (Aevb, AevbEngine, AevbGenModel, AevbInfo,
+                            AevbRecModel, AevbState)

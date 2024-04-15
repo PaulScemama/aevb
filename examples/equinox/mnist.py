@@ -8,8 +8,9 @@ import optax
 from datasets import load_dataset
 from jax.random import PRNGKey
 
-from aevb.aevb import AevbEngine, AevbState
 from aevb._src.types import ArrayLike
+from aevb.aevb import Aevb, AevbEngine, AevbState
+from aevb.equinox_util import init_apply_eqx_model
 
 
 # Data Processing Functions ----------------------------------
@@ -126,23 +127,30 @@ def main(save_samples_pth: str):
     latent_dim = 4
     data_dim = 784
     optimizer = optax.adam(1e-3)
-    engine = AevbEngine.from_equinox_module(
+
+    gen_init, gen_apply = init_apply_eqx_model(gen_model)
+    rec_init, rec_apply = init_apply_eqx_model(rec_model)
+
+    engine: AevbEngine = Aevb(
         latent_dim=latent_dim,
         data_dim=data_dim,
         gen_prior="unit_normal",
         gen_obs_dist="normal",
-        gen_module=gen_model,
+        gen_apply=gen_apply,
+        gen_init=gen_init,
         rec_dist="normal",
-        rec_module=rec_model,
+        rec_apply=rec_apply,
+        rec_init=rec_init,
         optimizer=optimizer,
         n_samples=5,
     )
+
     # Run AEVB
-    key = random.key(123)
+    key = random.key(1242)
     num_steps = 3000
     eval_every = 100
 
-    aevb_state = engine.init()
+    aevb_state: AevbState = engine.init(gen_init_args=(), rec_init_args=())
 
     key, *training_keys = random.split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):
@@ -152,39 +160,67 @@ def main(save_samples_pth: str):
             print(f"Step {i} | loss: {info.loss} | nll: {info.nll} | kl: {info.kl}")
 
     # Random Data Samples of Learned Generative Model
-    def generate_random_samples(key: random.key, aevb_engine: AevbEngine, aevb_state: AevbState, n_samples: int):
+    def generate_random_samples(
+        key: random.key, aevb_engine: AevbEngine, aevb_state: AevbState, n_samples: int
+    ):
         z_key, x_key = random.split(key)
         if aevb_engine.gen_model.prior.sample is not None:
-            prior_zs = aevb_engine.gen_model.prior.sample(z_key, shape=(n_samples, latent_dim))
+            prior_zs = aevb_engine.gen_model.prior.sample(
+                z_key, shape=(n_samples, latent_dim)
+            )
         else:
             # defer to N(0, 1)
-            prior_zs = jax.random.normal(z_key, shape=(n_samples, aevb_engine.latent_dim))
-        
-        x_params, _ = aevb_engine.gen_model.apply(aevb_state.gen_params, aevb_state.gen_state, prior_zs, train=False)
+            prior_zs = jax.random.normal(
+                z_key, shape=(n_samples, aevb_engine.latent_dim)
+            )
+
+        x_params, _ = aevb_engine.gen_model.apply(
+            aevb_state.gen_params, aevb_state.gen_state, prior_zs, train=False
+        )
 
         if aevb_engine.gen_model.obs_dist.sample is not None:
             xs = aevb_engine.gen_model.obs_dist.sample(x_key, **x_params, shape=())
             return xs
         else:
             return x_params
-        
+
     key, data_samples_key = random.split(key)
-    x_samples = generate_random_samples(data_samples_key, engine, aevb_state, n_samples=5)
+    x_samples = generate_random_samples(
+        data_samples_key, engine, aevb_state, n_samples=5
+    )
 
     # Encode/Decode samples using Learned Recognition and Generative Models
-    def encode(key: random.key, aevb_engine: AevbEngine, aevb_state: AevbState, x: ArrayLike, n_samples: int):
+    def encode(
+        key: random.key,
+        aevb_engine: AevbEngine,
+        aevb_state: AevbState,
+        x: ArrayLike,
+        n_samples: int,
+    ):
         rec_model = aevb_engine.rec_model
-        z_params, _ = rec_model.apply(aevb_state.rec_params, aevb_state.rec_state, x, train=False)
+        z_params, _ = rec_model.apply(
+            aevb_state.rec_params, aevb_state.rec_state, x, train=False
+        )
         return rec_model.dist.reparam_sample(key, **z_params, n_samples=n_samples)
-    
-    def decode(key: random.key, aevb_engine: AevbEngine, aevb_state: AevbEngine, z: ArrayLike, n_samples: int):
-        x_params, _ = aevb_engine.gen_model.apply(aevb_state.gen_params, aevb_state.gen_state, z, train=False)
+
+    def decode(
+        key: random.key,
+        aevb_engine: AevbEngine,
+        aevb_state: AevbEngine,
+        z: ArrayLike,
+        n_samples: int,
+    ):
+        x_params, _ = aevb_engine.gen_model.apply(
+            aevb_state.gen_params, aevb_state.gen_state, z, train=False
+        )
         if aevb_engine.gen_model.obs_dist.sample is not None:
-            xs = aevb_engine.gen_model.obs_dist.sample(key, **x_params, shape=(n_samples,))
+            xs = aevb_engine.gen_model.obs_dist.sample(
+                key, **x_params, shape=(n_samples,)
+            )
             return xs
         else:
             return x_params
-        
+
     key, encode_key, decode_key = random.split(key, 3)
     z_samples = encode(encode_key, engine, aevb_state, x_samples, n_samples=30)
     z_means = z_samples.mean(axis=0)
@@ -204,6 +240,7 @@ def main(save_samples_pth: str):
     plt.tight_layout()
 
     plt.savefig(save_samples_pth, format="png")
+
 
 if __name__ == "__main__":
     from time import localtime, strftime

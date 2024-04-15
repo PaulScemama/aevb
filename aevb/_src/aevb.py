@@ -8,7 +8,7 @@ import optax
 from jax.tree_util import tree_leaves
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
-from jax.tree_util import tree_leaves
+
 from aevb._src import dist
 from aevb._src.dist import normal
 
@@ -18,11 +18,7 @@ ArrayLikeTree = Union[
 ]
 
 
-
-
-builtin_priors = {
-    "unit_normal": dist.set_params(normal, loc=0, scale=1)
-}
+builtin_priors = {"unit_normal": dist.set_params(normal, loc=0, scale=1)}
 
 builtin_dists = {
     "normal": normal,
@@ -40,6 +36,7 @@ class GenPrior:
 class GenObsDist:
     logpdf: Callable
     sample: Callable = None
+
 
 @dataclass
 class RecDist:
@@ -76,6 +73,15 @@ class AevbInfo(NamedTuple):
     nll: float
     kl: float
 
+
+class AevbEngine(NamedTuple):
+    latent_dim: int
+    data_dim: Union[tuple, int]
+    gen_model: AevbGenModel
+    rec_model: AevbRecModel
+
+    init: Callable  # Union[Callable[[random.key, tuple[int]], AevbState], Callable[[]], AevbState]
+    step: Callable[[random.key, AevbState, ArrayLike], tuple[AevbState, AevbInfo]]
 
 
 def unit_normal_kl(loc, scale):
@@ -182,7 +188,7 @@ def make_step(
 
 def _convert_gen_prior(dist: Union[str, Callable]) -> GenPrior:
     if isinstance(dist, str):
-        name = dist 
+        name = dist
         dist = builtin_priors[dist]
         logpdf, sample = dist.logpdf, dist.sample
     elif isinstance(dist, tuple[Callable, Callable]):
@@ -192,11 +198,13 @@ def _convert_gen_prior(dist: Union[str, Callable]) -> GenPrior:
         name = None
         logpdf, sample = dist, None
     else:
-        raise ValueError # TODO: fill in
+        raise ValueError  # TODO: fill in
     return GenPrior(logpdf, sample, name)
 
 
-def _convert_gen_obs_dist(dist: Union[str, Callable, tuple[Callable, Callable]]) -> GenObsDist:
+def _convert_gen_obs_dist(
+    dist: Union[str, Callable, tuple[Callable, Callable]]
+) -> GenObsDist:
     if isinstance(dist, str):
         dist = builtin_dists[dist]
         logpdf, sample = dist.logpdf, dist.sample
@@ -205,7 +213,7 @@ def _convert_gen_obs_dist(dist: Union[str, Callable, tuple[Callable, Callable]])
     elif isinstance(dist, Callable):
         logpdf, sample = dist, None
     else:
-        raise ValueError # TODO: fill in
+        raise ValueError  # TODO: fill in
     return GenObsDist(logpdf, sample)
 
 
@@ -218,7 +226,7 @@ def _convert_rec_dist(dist: Union[str, tuple[Callable, Callable]]) -> RecDist:
         dist_name = None
         logpdf, reparam_sample = dist
     else:
-        raise ValueError # TODO: fill in
+        raise ValueError  # TODO: fill in
     return RecDist(logpdf, reparam_sample, dist_name)
 
 
@@ -226,172 +234,35 @@ def _create_kl_fn(prior: GenPrior, dist: RecDist) -> Callable:
     if prior.name == "unit_normal" and dist.name == "normal":
         return unit_normal_kl
     else:
-        raise NotImplementedError # TODO: fill in
+        raise NotImplementedError  # TODO: fill in
 
 
-def _setup_init_step_from_applys(
-    gen_logpdf, gen_apply, rec_dist, rec_apply, kl_fn, optimizer, n_samples
-):
-    def init_fn(rec_params, rec_state, gen_params, gen_state) -> AevbState:
-        opt_state = optimizer.init((rec_params, gen_params))
-        return AevbState(rec_params, rec_state, gen_params, gen_state, opt_state)
+class Aevb:
 
-    step_fn = make_step(
-        gen_apply,
-        gen_logpdf,
-        rec_apply,
-        rec_dist.reparam_sample,
-        kl_fn,
-        optimizer,
-        n_samples,
-    )
-    return init_fn, step_fn
+    convert_gen_prior = staticmethod(_convert_gen_prior)
+    convert_gen_obs_dist = staticmethod(_convert_gen_obs_dist)
+    convert_rec_dist = staticmethod(_convert_rec_dist)
+    create_kl_fn = staticmethod(_create_kl_fn)
+    make_step = staticmethod(make_step)
 
-
-def _setup_init_step_from_flax_inits_applys(
-    gen_init,
-    gen_apply,
-    rec_init,
-    rec_apply,
-    latent_dim,
-    data_dim,
-    gen_logpdf,
-    rec_dist,
-    kl_fn,
-    optimizer,
-    n_samples,
-):
-
-    def init_fn(rng_key) -> AevbState:
-        (gen_params, gen_state) = gen_init(rng_key, jnp.ones((1, latent_dim)))
-        (rec_params, rec_state) = rec_init(rng_key, jnp.ones((1, data_dim)))
-        opt_state = optimizer.init((rec_params, gen_params))
-        return AevbState(rec_params, rec_state, gen_params, gen_state, opt_state)
-
-    step_fn = make_step(
-        gen_apply,
-        gen_logpdf,
-        rec_apply,
-        rec_dist.reparam_sample,
-        kl_fn,
-        optimizer,
-        n_samples,
-    )
-    return init_fn, step_fn
-
-
-def _setup_init_step_from_equinox_inits_applys(
-    gen_init,
-    gen_apply,
-    rec_init,
-    rec_apply,
-    gen_logpdf,
-    rec_dist,
-    kl_fn,
-    optimizer,
-    n_samples,
-):
-
-    def init_fn() -> AevbState:
-        (gen_params, gen_state) = gen_init()
-        (rec_params, rec_state) = rec_init()
-        opt_state = optimizer.init((rec_params, gen_params))
-        return AevbState(rec_params, rec_state, gen_params, gen_state, opt_state)
-
-    step_fn = make_step(
-        gen_apply,
-        gen_logpdf,
-        rec_apply,
-        rec_dist.reparam_sample,
-        kl_fn,
-        optimizer,
-        n_samples,
-    )
-    return init_fn, step_fn
-
-
-def _setup_init_step_from_haiku_modules(): ...
-
-
-@dataclass
-class AevbEngine:
-
-    latent_dim: int
-    data_dim: Union[tuple, int]
-    gen_model: AevbGenModel
-    rec_model: AevbRecModel
-
-    init: Callable# Union[Callable[[random.key, tuple[int]], AevbState], Callable[[]], AevbState]
-    step: Callable[[random.key, AevbState, ArrayLike], tuple[AevbState, AevbInfo]]
-
-
-    @classmethod
-    def from_applys(
+    def __new__(
         cls,
         latent_dim: int,
         data_dim: int,
         gen_prior: Union[str, Callable, tuple[Callable, Callable]],
         gen_obs_dist: Union[str, Callable, tuple[Callable, Callable]],
         gen_apply: Callable,
+        gen_init: Callable,
         rec_dist: Union[str, tuple[Callable, Callable]],
         rec_apply: Callable,
+        rec_init: Callable,
         optimizer: GradientTransformation,
         n_samples: int,
     ):
-        gen_prior: GenPrior = _convert_gen_prior(gen_prior)
-        gen_obs_dist: GenObsDist = _convert_gen_obs_dist(gen_obs_dist)
-        rec_dist: RecDist = _convert_rec_dist(rec_dist)
-        kl_fn: Callable = _create_kl_fn(gen_prior, rec_dist)
-        gen_model: AevbGenModel = AevbGenModel(
-            prior=gen_prior,
-            obs_dist=gen_obs_dist,
-            apply=gen_apply,
-            init=None,
-        )
-        rec_model: AevbRecModel = AevbRecModel(
-            dist=rec_dist, init=None, apply=rec_apply
-        )
-        aevb_init, aevb_step = _setup_init_step_from_applys(
-            gen_logpdf=gen_obs_dist.logpdf,
-            gen_apply=gen_apply,
-            rec_dist=rec_dist,
-            rec_apply=rec_apply,
-            kl_fn=kl_fn,
-            optimizer=optimizer,
-            n_samples=n_samples,
-        )
-        engine = cls(
-            latent_dim=latent_dim,
-            data_dim=data_dim,
-            gen_model=gen_model,
-            rec_model=rec_model,
-            init=aevb_init,
-            step=aevb_step,
-        )
-        return engine
-
-    @classmethod
-    def from_flax_module(
-        cls,
-        latent_dim,
-        data_dim,
-        gen_prior,
-        gen_obs_dist,
-        gen_module,
-        rec_dist,
-        rec_module,
-        optimizer,
-        n_samples,
-    ):
-        gen_prior: GenPrior = _convert_gen_prior(gen_prior)
-        gen_obs_dist: GenObsDist = _convert_gen_obs_dist(gen_obs_dist)
-        rec_dist: RecDist = _convert_rec_dist(rec_dist)
-        kl_fn: Callable = _create_kl_fn(gen_prior, rec_dist)
-
-        from aevb._src.flax_util import init_apply_flax_model
-
-        gen_init, gen_apply = init_apply_flax_model(gen_module)
-        rec_init, rec_apply = init_apply_flax_model(rec_module)
+        gen_prior: GenPrior = cls.convert_gen_prior(gen_prior)
+        gen_obs_dist: GenObsDist = cls.convert_gen_obs_dist(gen_obs_dist)
+        rec_dist: RecDist = cls.convert_rec_dist(rec_dist)
+        kl_fn: Callable = cls.create_kl_fn(gen_prior, rec_dist)
 
         gen_model: AevbGenModel = AevbGenModel(
             prior=gen_prior,
@@ -400,131 +271,25 @@ class AevbEngine:
             init=gen_init,
         )
         rec_model: AevbRecModel = AevbRecModel(
-            dist=rec_dist,
-            apply=rec_apply,
-            init=rec_init,
+            dist=rec_dist, init=rec_init, apply=rec_apply
         )
-        aevb_init, aevb_step = _setup_init_step_from_flax_inits_applys(
-            gen_init=gen_init,
-            gen_apply=gen_apply,
-            rec_init=rec_init,
-            rec_apply=rec_apply,
-            latent_dim=latent_dim,
-            data_dim=data_dim,
-            gen_logpdf=gen_obs_dist.logpdf,
-            rec_dist=rec_dist,
-            kl_fn=kl_fn,
-            optimizer=optimizer,
-            n_samples=n_samples,
-        )
-        engine = cls(
-            latent_dim=latent_dim,
-            data_dim=data_dim,
-            gen_model=gen_model,
-            rec_model=rec_model,
-            init=aevb_init,
-            step=aevb_step,
-        )
-        return engine
 
-    @classmethod
-    def from_equinox_module(
-        cls,
-        latent_dim,
-        data_dim,
-        gen_prior,
-        gen_obs_dist,
-        gen_module,
-        rec_dist,
-        rec_module,
-        optimizer,
-        n_samples,
-    ):
-        gen_prior: GenPrior = _convert_gen_prior(gen_prior)
-        gen_obs_dist: GenObsDist = _convert_gen_obs_dist(gen_obs_dist)
-        rec_dist: RecDist = _convert_rec_dist(rec_dist)
-        kl_fn: Callable = _create_kl_fn(gen_prior, rec_dist)
+        def aevb_init(gen_init_args, rec_init_args) -> AevbState:
+            gen_params, gen_state = gen_init(*gen_init_args)
+            rec_params, rec_state = rec_init(*rec_init_args)
+            opt_state = optimizer.init((rec_params, gen_params))
+            return AevbState(rec_params, rec_state, gen_params, gen_state, opt_state)
 
-        from aevb._src.equinox_util import init_apply_eqx_model
+        aevb_step = cls.make_step(
+            gen_apply,
+            gen_obs_dist.logpdf,
+            rec_apply,
+            rec_dist.reparam_sample,
+            kl_fn,
+            optimizer,
+            n_samples,
+        )
 
-        gen_init, gen_apply = init_apply_eqx_model(gen_module)
-        rec_init, rec_apply = init_apply_eqx_model(rec_module)
-
-        gen_model: AevbGenModel = AevbGenModel(
-            prior=gen_prior,
-            obs_dist=gen_obs_dist,
-            apply=gen_apply,
-            init=gen_init,
+        return AevbEngine(
+            latent_dim, data_dim, gen_model, rec_model, aevb_init, aevb_step
         )
-        rec_model: AevbRecModel = AevbRecModel(
-            dist=rec_dist,
-            apply=rec_apply,
-            init=rec_init,
-        )
-        aevb_init, aevb_step = _setup_init_step_from_equinox_inits_applys(
-            gen_init=gen_init,
-            gen_apply=gen_apply,
-            rec_init=rec_init,
-            rec_apply=rec_apply,
-            gen_logpdf=gen_obs_dist.logpdf,
-            rec_dist=rec_dist,
-            kl_fn=kl_fn,
-            optimizer=optimizer,
-            n_samples=n_samples,
-        )
-        engine = cls(
-            latent_dim=latent_dim,
-            data_dim=data_dim,
-            gen_model=gen_model,
-            rec_model=rec_model,
-            init=aevb_init,
-            step=aevb_step,
-        )
-        return engine
-
-    @classmethod
-    def from_haiku_module(
-        cls,
-        latent_dim,
-        data_dim,
-        gen_prior,
-        gen_obs_dist,
-        gen_module,
-        rec_dist,
-        rec_module,
-        optimizer,
-        n_samples,
-    ):
-        gen_prior: GenPrior = _convert_gen_prior(gen_prior)
-        gen_obs_dist: GenObsDist = _convert_gen_obs_dist(gen_obs_dist)
-        rec_dist: RecDist = _convert_rec_dist(rec_dist)
-        kl_fn: Callable = _create_kl_fn(gen_prior, rec_dist)
-        gen_model: AevbGenModel = AevbGenModel(
-            prior=gen_prior,
-            obs_dist=gen_obs_dist,
-            module=gen_module,
-            init=None,
-            apply=None,
-        )
-        rec_model: AevbRecModel = AevbRecModel(
-            dist=rec_dist, module=rec_module, init=None, apply=None
-        )
-        aevb_init, aevb_step = _setup_init_step_from_haiku_modules(
-            latent_dim=latent_dim,
-            gen_logpdf=gen_obs_dist.logpdf,
-            gen_module=gen_module,
-            rec_dist=rec_dist,
-            rec_module=rec_module,
-            kl_fn=kl_fn,
-            optimizer=optimizer,
-            n_samples=n_samples,
-        )
-        engine = cls(
-            latent_dim=latent_dim,
-            data_dim=data_dim,
-            gen_model=gen_model,
-            rec_model=rec_model,
-            init=aevb_init,
-            step=aevb_step,
-        )
-        return engine
