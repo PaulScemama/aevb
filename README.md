@@ -6,7 +6,7 @@ Applying the AEVB Estimator to Latent Variable Models
 The purpose of this package is to provide a simple (but general) implementation of the Auto-Encoding Variational Bayes (AEVB) inference algorithm ([Kingma et. al, 2014](https://arxiv.org/abs/1312.6114)) as well as a composable and interoperable interface for the implementation.
 
 ### Interoperability
-- [x] Arbitrary `apply` callables for the encoder/decoder mappings.
+- [x] Arbitrary `init/apply` callables for the encoder/decoder mappings.
 - [x] Flax modules for the initialization and encoder/decoder mappings.
 - [x] Equinox modules for the initialization and encoder/decoder mappings.
 - [ ] Haiku modules for the initialization and encoder/decoder mappings.
@@ -46,80 +46,48 @@ I often refer to $f_{\phi}$ as the "encoder".
 
 In order to use `aevb`, the user must define...
 
-1. `latent_dim`: the dimension of the latent variable $z$. 
-2. `data_dim`: the dimension of the data $x$. 
-3. `gen_prior`: the logpdf function of a prior distribution over continuous latent variable $z$. 
-4. `gen_obs_dist`: the logpdf function of a distribution over the data $x$. 
-5. `gen_apply`: a function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`. 
-6. `rec_dist`: the logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$. 
-7. `rec_apply`: a function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`. 
-8. `optimizer`: an `optax` optimizer.
-9. `n_samples`: the number of samples to take from the reparameterized sample function of `rec_dist` during one step of optimization. 
+1. `latent_dim: int`: the dimension of the latent variable $z$. 
+2. `data_dim: int`: the dimension of the data $x$. 
+3. `gen_prior: str | Callable`: the logpdf function of a prior distribution over continuous latent variable $z$. 
+4. `gen_obs_dist: str | Callable`: the logpdf function of a distribution over the data $x$.
+6. `gen_apply`: a function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`.
+7. `gen_init`: an initialization for the function mapping defined by `gen_apply`. 
+8. `rec_dist`: the logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$. 
+9. `rec_apply`: a function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`.
+10. `rec_init`: an initialization for the function mapping defined by `rec_apply`. 
+11. `optimizer`: an `optax` optimizer.
+12. `n_samples`: the number of samples to take from the reparameterized sample function of `rec_dist` during one step of optimization. 
 
-An example using `jax` functions for `gen_apply` and `rec_apply` are given in `examples/jax/`.
+### Restrictions on `apply`
+The `gen_apply` and `rec_apply` callables need to have a specific signature and form in order to work with `aevb`:
 
-> Note: there is builtin support for distributions. For example, one can pass in the string `'unit_normal'` as `gen_prior`; or one can pass in the string `'normal'` as `gen_obs_dist` or `rec_dist`. 
-
-The signature of `gen_apply` and `rec_apply` must be the following: 
-
+The signature can be represented like so:
 ```python
-(params: ArrayLikeTree, state: ArrayLikeTree, input: ArrayLike, train: bool) -> Dict[str, ArrayLike]
+def apply(params: ArrayLikeTree, state: ArrayLikeTree, input: ArrayLike, train: bool): -> tuple[Dict[str, Array], ArrayLikeTree]
 ```
 
-In words, the `apply` methods take in learnable parameters, a learnable state (if none is required, pass in an empty dictionary `{}`), input data, and a boolean flag indicating whether this is being used during training of the learnable components passed in. The output of `gen_apply` and `rec_apply` must output dictionaries where the keys are the keyword arguments for the `gen_obs_dist` logpdf and `rec_dist` logpdf and reparameterized sample, respectively. 
+The `apply` function should apply parameters and a (optional) state to an input in order to produce a tuple consisting of the output and a (optional) updated state. The `train` boolean flag is for the purpose of possibly updating the state. This is a common pattern in the `flax` library. An example of a `state` is the current values for the Batchnorm statistics. If no state is needed, then one can bind an empty dictionary to `state` as well as to the second element of the output tuple. 
 
-When the components listed above are passed to the `AevbEngine` contructor, two main functions are then available for the user.
+Another restriction on `apply` is that the first element of the output tuple is a dictionary mapping string keys to `jax` Arrays. *These keys need to correspond to the* `dist` *of the encoder/decoder*. That is, for the `gen_apply`, the keys need to correspond to the input arguments of `gen_obs_dist` logpdf callable.
 
-1. An `init` function. This takes in the learnable parameters (and possibly learnable state) and returns an `AevbState` object, which contains the learnable parameters (and possibly learnable state) and an optimization state.
-2. A `step` function. This takes in a `random.key`, an `AEVBState`, and a batch of data `x`, and returns an updated `AEVBState` after one step of optimization. 
 
-Other objects are available to the user from the `AevbEngine` as well. Look at `aevb._src.aevb.AevbEngine` for more information. 
-
-While the above 'user inputs' list contains the *required* inputs needed to create an `aevb` inference engine, a user may want to pass in higher-level objects (e.g. Flax or Equinox modules). The following sections demonstrate how to do this, and what changes about the properties of the `aevb` inference engine. 
+### Restrictions on `init`
+The `gen_init` and `rec_init` callables need only have a specific output form in order to work with `aevb`. That is, they both need to return a tuple of `params, state`. Again, if the `state` is not needed this can be an empty dictionary `{}`. 
 
 ### Using Flax Modules for Encoder/Decoder
-
-You can pass in `flax` modules in place of `gen_apply` and `rec_apply`. Why would you want to do this? You can initialize the first `AevbState` with `AevbEngine.init(key: random.key)` instead of having to initialize the parameters and state for the encoder/decoder and then pass that into `AevbEngine.init`. You also don't need to explicitly create the `apply` functions of the encoder/decoder modules. 
-
-Here's an example of what this may look like
+`aevb` provides functions that convert `flax` modules into `init/apply` functions that conform with the above specifications. The only restriction is that the `__call__` method of the `flax` module has a `train: bool` input argument. It is not required that it used in the method, however. Here is a simple example.
 
 ```python
 import jax
 import jax.numpy as jnp
-import jax.random as random
 import flax.linen as nn
 
-class Encoder(nn.Module):
-
+class Mlp(nn.Module):
     @nn.compact
     def __call__(self, x, train: bool = False):
-        x = nn.Dense(5)(x)
-        x = nn.BatchNorm(use_running_average=not train)(x)
-        x = nn.relu(x)
-        # rec_dist is of the loc/scale family. Here we fix
-        # the `scale` parameter and only learn how to construct `loc`. 
-        return {"loc": x, "scale": jnp.ones_like(x)}
+        x = nn.Dense(14, x)(x)
 
-class Decoder(nn.Module):
-    
-    @nn.compact
-    def __call__(self, x, train: bool = False)
-        x = nn.Dense(25)(x)
-        x = nn.relu(x)
-        # gen_obs_dist is of the loc/scale family. Here we fix
-        # the `scale` parameter and only learn how to construct `loc`. 
-        return {"loc": x, "scale": jnp.ones_like(x)} 
 
-encoder = Encoder()
-decoder = Decoder()
-
-engine = AevbEngine.from_flax_modules(
-    ...
-    gen_module=decoder,
-    rec_moodule=encoder,
-)
-
-aevb_state = engine.init(random.key(1))
 ```
 
 ### Using Equinox Modules for Encoder/Decoder
