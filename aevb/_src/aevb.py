@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, NamedTuple, Union
 
 import jax
@@ -25,36 +24,36 @@ builtin_dists = {
 }
 
 
-@dataclass
-class GenPrior:
+
+class GenPrior(NamedTuple):
     logpdf: Callable
     sample: Callable = None
     name: str = None
 
 
-@dataclass
-class GenObsDist:
+
+class GenObsDist(NamedTuple):
     logpdf: Callable
     sample: Callable = None
 
 
-@dataclass
-class RecDist:
+
+class RecDist(NamedTuple):
     logpdf: Callable
     reparam_sample: Callable
     name: str = None
 
 
-@dataclass
-class AevbGenModel:
+
+class AevbGenModel(NamedTuple):
     prior: GenPrior
     obs_dist: GenObsDist
     apply: callable
     init: callable = None
 
 
-@dataclass
-class AevbRecModel:
+
+class AevbRecModel(NamedTuple):
     dist: RecDist
     apply: callable
     init: callable = None
