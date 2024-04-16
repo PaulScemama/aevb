@@ -1,3 +1,5 @@
+**DISCLAIMER**: work in progress...
+
 # Autoencoding Variational Bayes
 Applying the AEVB Estimator to Latent Variable Models
 
