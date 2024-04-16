@@ -92,6 +92,8 @@ class Mlp(nn.Module):
 
 ### Using Equinox Modules for Encoder/Decoder
 
+1.  `__call__` should only have `x, state` as arguments, thus all layer instantiation should be done in `__init__` since they require a random key for initialization.
+
 
 ### Using Haiku Modules for Encoder/Decoder
 

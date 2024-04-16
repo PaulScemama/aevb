@@ -1,2 +1,1 @@
-from aevb._src.equinox_util import (DecMLP, EncMLP, batch_model,
-                                    init_apply_eqx_model)
+from aevb._src.equinox_util import MLP, batch_model, init_apply_eqx_model

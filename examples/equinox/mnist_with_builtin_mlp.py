@@ -9,7 +9,7 @@ from datasets import load_dataset
 
 from aevb._src.types import ArrayLike
 from aevb.aevb import Aevb, AevbEngine, AevbState
-from aevb.equinox_util import init_apply_eqx_model
+from aevb.equinox_util import MLP, init_apply_eqx_model
 
 
 # Data Processing Functions ----------------------------------
@@ -39,70 +39,27 @@ def data_stream(seed, data, batch_size, data_size):
             yield data[batch_idx]
 
 
-@eqx.nn.make_with_state
-class RecModel(eqx.Module):
+rec_model = MLP(
+    random.key(0),
+    in_dim=784,
+    hidden=[512, 512, 256, 128, 64],
+    activation=(jax.nn.relu, [0, 1, 2]),
+    batchnorm_idx=[
+        0,
+    ],
+    output_heads={"loc": 4, "scale": (4, lambda x: jnp.exp(0.5 * x))},
+)
 
-    latent_dim: int
-    layers: list
-    projection_layers: list
-
-    def __init__(self, key: random.key, latent_dim: int):
-        keys = random.split(key, 6)
-        self.latent_dim = latent_dim
-
-        self.layers = [
-            eqx.nn.Linear(in_features=784, out_features=512, key=keys[0]),
-            eqx.nn.BatchNorm(input_size=512, axis_name="batch"),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=512, out_features=256, key=keys[1]),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=256, out_features=128, key=keys[2]),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=128, out_features=64, key=keys[3]),
-        ]
-        self.projection_layers = [
-            eqx.nn.Linear(in_features=64, out_features=self.latent_dim, key=keys[4]),
-            eqx.nn.Linear(in_features=64, out_features=self.latent_dim, key=keys[5]),
-        ]
-
-    def __call__(self, x, state):
-        for layer in self.layers:
-            if isinstance(layer, eqx.nn._batch_norm.BatchNorm):
-                x, state = layer(x, state)
-            else:
-                x = layer(x)
-
-        mu = self.projection_layers[0](x)
-        logvar = self.projection_layers[1](x)
-        sigma = jnp.exp(logvar * 0.5)
-        return {"loc": mu, "scale": sigma}, state
-
-
-@eqx.nn.make_with_state
-class GenModel(eqx.Module):
-
-    latent_dim: int
-    layers: list
-
-    def __init__(self, key: random.key, latent_dim: int):
-        keys = random.split(key, 3)
-        self.latent_dim = latent_dim
-        self.layers = [
-            eqx.nn.Linear(in_features=self.latent_dim, out_features=128, key=keys[0]),
-            eqx.nn.BatchNorm(input_size=128, axis_name="batch"),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=128, out_features=256, key=keys[1]),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=256, out_features=784, key=keys[2]),
-        ]
-
-    def __call__(self, x, state):
-        for layer in self.layers:
-            if isinstance(layer, eqx.nn._batch_norm.BatchNorm):
-                x, state = layer(x, state)
-            else:
-                x = layer(x)
-        return {"loc": x, "scale": jnp.ones_like(x) * 0.1}, state
+gen_model = MLP(
+    random.key(1),
+    in_dim=4,
+    hidden=[128, 128, 256, 64],
+    activation=(jax.nn.relu, [0, 1, 2]),
+    batchnorm_idx=[
+        0,
+    ],
+    output_heads={"loc": 784, "scale": (784, lambda _: jnp.ones(784) * 0.1)},
+)
 
 
 # Main Function --------------------------------
@@ -121,8 +78,6 @@ def main(save_samples_pth: str):
     batches = data_stream(seed, X_train, batch_size, n)
 
     # Create AEVB inference engine
-    gen_model = GenModel(random.key(0), latent_dim=4)
-    rec_model = RecModel(random.key(1), latent_dim=4)
     latent_dim = 4
     data_dim = 784
     optimizer = optax.adam(1e-3)

@@ -99,6 +99,7 @@ class normal:
     def sample(key, loc, scale, shape=()):
         return scale * jax.random.normal(key, shape=shape) + loc
 
+
 normal = loc_scale(normal, name="normal")
 
 
@@ -106,17 +107,21 @@ class laplace:
 
     def logpdf(x, loc, scale): ...
 
+
 laplace = loc_scale(laplace, name="laplace")
 
 
 class logistic:
-    
+
     def logpdf(x, loc, scale): ...
 
+
 logistic = loc_scale(logistic, name="logistic")
+
 
 class student_t:
 
     def logpdf(x, loc, scale): ...
+
 
 student_t = loc_scale(student_t, name="student_t")
