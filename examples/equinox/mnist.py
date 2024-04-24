@@ -7,9 +7,9 @@ import numpy as np
 import optax
 from datasets import load_dataset
 
-from aevb._src.types import ArrayLike
 from aevb.aevb import Aevb, AevbEngine, AevbState
 from aevb.equinox_util import init_apply_eqx_model
+from aevb.util import decode, encode, generate_random_samples
 
 
 # Data Processing Functions ----------------------------------
@@ -158,72 +158,15 @@ def main(save_samples_pth: str):
         if i % eval_every == 0:
             print(f"Step {i} | loss: {info.loss} | nll: {info.nll} | kl: {info.kl}")
 
-    # Random Data Samples of Learned Generative Model
-    def generate_random_samples(
-        key: random.key, aevb_engine: AevbEngine, aevb_state: AevbState, n_samples: int
-    ):
-        z_key, x_key = random.split(key)
-        if aevb_engine.gen_model.prior.sample is not None:
-            prior_zs = aevb_engine.gen_model.prior.sample(
-                z_key, shape=(n_samples, latent_dim)
-            )
-        else:
-            # defer to N(0, 1)
-            prior_zs = jax.random.normal(
-                z_key, shape=(n_samples, aevb_engine.latent_dim)
-            )
-
-        x_params, _ = aevb_engine.gen_model.apply(
-            aevb_state.gen_params, aevb_state.gen_state, prior_zs, train=False
-        )
-
-        if aevb_engine.gen_model.obs_dist.sample is not None:
-            xs = aevb_engine.gen_model.obs_dist.sample(x_key, **x_params, shape=())
-            return xs
-        else:
-            return x_params
-
     key, data_samples_key = random.split(key)
     x_samples = generate_random_samples(
         data_samples_key, engine, aevb_state, n_samples=5
     )
 
-    # Encode/Decode samples using Learned Recognition and Generative Models
-    def encode(
-        key: random.key,
-        aevb_engine: AevbEngine,
-        aevb_state: AevbState,
-        x: ArrayLike,
-        n_samples: int,
-    ):
-        rec_model = aevb_engine.rec_model
-        z_params, _ = rec_model.apply(
-            aevb_state.rec_params, aevb_state.rec_state, x, train=False
-        )
-        return rec_model.dist.reparam_sample(key, **z_params, n_samples=n_samples)
-
-    def decode(
-        key: random.key,
-        aevb_engine: AevbEngine,
-        aevb_state: AevbEngine,
-        z: ArrayLike,
-        n_samples: int,
-    ):
-        x_params, _ = aevb_engine.gen_model.apply(
-            aevb_state.gen_params, aevb_state.gen_state, z, train=False
-        )
-        if aevb_engine.gen_model.obs_dist.sample is not None:
-            xs = aevb_engine.gen_model.obs_dist.sample(
-                key, **x_params, shape=(n_samples,)
-            )
-            return xs
-        else:
-            return x_params
-
     key, encode_key, decode_key = random.split(key, 3)
     z_samples = encode(encode_key, engine, aevb_state, x_samples, n_samples=30)
     z_means = z_samples.mean(axis=0)
-    x_recon = decode(decode_key, engine, aevb_state, z_means, n_samples=1)
+    x_recon = decode(decode_key, engine, aevb_state, z_means)
 
     fig, axs = plt.subplots(2, 5)
     for i, s in enumerate(x_samples):

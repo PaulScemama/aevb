@@ -1,1 +1,1 @@
-from aevb._src.dist import normal, normal_like
+from aevb._src.dist import normal

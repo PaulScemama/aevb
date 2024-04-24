@@ -99,8 +99,10 @@ class normal:
     def sample(key, loc, scale, shape=()):
         return scale * jax.random.normal(key, shape=shape) + loc
 
-
-normal = loc_scale(normal, name="normal")
+    def reparam_sample(key, loc, scale, n_samples):
+        return loc_scale_reparam_sample(standard_samplers["normal"])(
+            key, loc, scale, n_samples
+        )
 
 
 class laplace:
