@@ -47,18 +47,19 @@ I often refer to $f_{\phi}$ as the "encoder".
 ## How To Use
 
 In order to use `aevb`, the user must define...
-
-1. `latent_dim: int`: the dimension of the latent variable $z$. 
-2. `data_dim: int`: the dimension of the data $x$. 
-3. `gen_prior: str | Callable`: the logpdf function of a prior distribution over continuous latent variable $z$, or a string corresponding to a built-in prior.
-4. `gen_obs_dist: str | Callable`: the logpdf function of a distribution over the data $x$, or a string corresponding to a built-in distribution. 
-6. `gen_apply: Callable`: a function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`.
-7. `gen_init: Callable`: an initialization for the parameters and state that will be passed into `gen_apply`. 
-8. `rec_dist: str | Callable`: the logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$. 
-9. `rec_apply: Callable`: a function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`.
-10. `rec_init: Callable`: an initialization for the parameters and state that will be passed into `rec_apply`. 
-11. `optimizer: GradientTransformation`: an `optax` optimizer.
-12. `n_samples: int`: the number of samples to take from the reparameterized sample function of `rec_dist` during one step of optimization. 
+| Parameter name | Type | Description | 
+| ----------------| -------------- | --------------- |
+| `latent_dim` | `int` | The dimension of the latent variable $z$.|
+|`data_dim` | `int` | The dimension of the data $x$.| 
+| `gen_prior`| `Union[str, Callable]` | The logpdf function of a prior distribution over continuous latent variable $z$, or a string corresponding to a built-in prior.|
+|`gen_obs_dist`| `Union[str, Callable]`| The logpdf function of a distribution over the data $x$, or a string corresponding to a built-in distribution.|
+| `gen_apply` |`Callable`|A function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`.|
+| `gen_init`| `Callable`| An initialization for the parameters and state that will be passed into `gen_apply`.| 
+|`rec_dist`| `Union[str, Callable]`| The logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$.|
+|`rec_apply`|  `Callable` |A function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`.|
+|`rec_init` |`Callable`| An initialization for the parameters and state that will be passed into `rec_apply`.| 
+|`optimizer`| `GradientTransformation`| An `optax` optimizer.|
+|`n_samples`| `int`| The number of samples to take from the reparameterized sample function of `rec_dist` during one step of optimization. |
 
 ### Restrictions on `apply`
 The `gen_apply` and `rec_apply` callables need to have a specific signature and form in order to work with `aevb`:
