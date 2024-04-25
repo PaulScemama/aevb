@@ -55,7 +55,7 @@ In order to use `aevb`, the user must define...
 |`gen_obs_dist`| `Union[str, Callable]`| The logpdf function of a distribution over the data $x$, or a string corresponding to a built-in distribution.|
 | `gen_apply` |`Callable`|A function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`.|
 | `gen_init`| `Callable`| An initialization for the parameters and state that will be passed into `gen_apply`.| 
-|`rec_dist`| `Union[str, Callable]`| The logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$.|
+|`rec_dist`| `Union[str, tuple[Callable, Callable]`| The logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$, or a string corresopnding to a built-in distribution.|
 |`rec_apply`|  `Callable` |A function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`.|
 |`rec_init` |`Callable`| An initialization for the parameters and state that will be passed into `rec_apply`.| 
 |`optimizer`| `GradientTransformation`| An `optax` optimizer.|
