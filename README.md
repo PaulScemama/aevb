@@ -115,7 +115,7 @@ Also, if you want to use a supported neural network library (e.g. Flax), you can
 ----------| ---------| 
 | Minimal install | `pip install git+https://github.com/PaulScemama/aevb`|
 
-
+> Note: to run an example you will have to install other packages. For example, to run `examples/flax/mnist.py` you will need to install `datasets`, `matplotlib`, and `flax`. 
 <!-- |Install with example dependencies| `pip install 'git+https://github.com/PaulScemama/aevb[examples]'`| -->
 
 
