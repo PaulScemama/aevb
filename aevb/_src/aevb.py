@@ -89,27 +89,18 @@ def unit_normal_kl(z, loc, scale):
     return kl_val
 
 
-def _encode(
+def _encode_and_sample(
+    key: random.key,
     rec_params: ArrayLikeTree,
     rec_state: ArrayLikeTree,
-    rec_apply: Callable,
     x: ArrayLike,
-):
-    z_params, upd_rec_state = rec_apply(rec_params, rec_state, x, train=True)
-    return z_params, upd_rec_state
-
-
-def _sample_z_and_reshape(
-    key: random.key,
-    z_params: Mapping[str, ArrayLikeTree],
+    rec_apply: Callable,
     rec_sample: Callable,
-    batch_size: int,
     n_samples: int,
 ):
-    # [n_samples, batch_size, latent_dim]
+    z_params, upd_rec_state = rec_apply(rec_params, rec_state, x, train=True)
     z = rec_sample(key, **z_params, n_samples=n_samples)
-    z = z.reshape(batch_size * n_samples, -1)
-    return z
+    return z, z_params, upd_rec_state
 
 
 def _decode(
@@ -140,23 +131,28 @@ def _analytical_kl_step(
 ) -> tuple[
     tuple[ArrayLikeTree, ArrayLikeTree, ArrayLikeTree], tuple[float, float, float]
 ]:
-    batch_size = x.shape[0]
-
+    
     def loss_fn(
         rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
     ) -> tuple[float, tuple[float, float]]:
 
-        z_params, upd_rec_state = _encode(rec_params, rec_state, rec_apply, x)
-        # [n_samples*batch_size, latent_dim]
-        z = _sample_z_and_reshape(rng_key, z_params, rec_sample, batch_size, n_samples)
+        # ----- Encode and Decode ----
+        # z: [n_samples, batch, latent_dim]
+        z, z_params, upd_rec_state = _encode_and_sample(rng_key, rec_params, rec_state, x, rec_apply, rec_sample, n_samples)
 
+        # Each x_param is [n_samples, batch_size, ...]
         x_params, upd_gen_state = _decode(gen_params, gen_state, gen_apply, z)
-        # [n_samples*batch_size, data_dim]
-        x_tiled = jnp.tile(x, (n_samples, 1))
 
-        # Compute losses
+        # ----- Compute losses -----
+        # Analytical KL loss
         kl = kl_fn(z, **z_params)
-        nll = -gen_logpdf(x_tiled, **x_params) / n_samples
+
+        # x is [batch_size, data_dim]
+        # Each x_param is [n_samples, batch_size, ...]
+        # Broadcasting will take care of the leading dimension mismatch.
+        nll = -gen_logpdf(x, **x_params) / n_samples
+
+        # ----- Combine losses -----
         loss = nll + kl
         return loss, ((nll, kl), (upd_rec_state, upd_gen_state))
 

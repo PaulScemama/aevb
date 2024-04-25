@@ -52,7 +52,7 @@ class RecModel(eqx.Module):
 
         self.layers = [
             eqx.nn.Linear(in_features=784, out_features=512, key=keys[0]),
-            eqx.nn.BatchNorm(input_size=512, axis_name="batch"),
+            eqx.nn.BatchNorm(input_size=512, axis_name=("batch", "batch2")),
             jax.nn.relu,
             eqx.nn.Linear(in_features=512, out_features=256, key=keys[1]),
             jax.nn.relu,
@@ -89,7 +89,7 @@ class GenModel(eqx.Module):
         self.latent_dim = latent_dim
         self.layers = [
             eqx.nn.Linear(in_features=self.latent_dim, out_features=128, key=keys[0]),
-            eqx.nn.BatchNorm(input_size=128, axis_name="batch"),
+            eqx.nn.BatchNorm(input_size=128, axis_name=("batch", "batch2")),
             jax.nn.relu,
             eqx.nn.Linear(in_features=128, out_features=256, key=keys[1]),
             jax.nn.relu,
@@ -127,8 +127,8 @@ def main(save_samples_pth: str):
     data_dim = 784
     optimizer = optax.adam(1e-3)
 
-    gen_init, gen_apply = init_apply_eqx_model(gen_model, batchnorm=True)
-    rec_init, rec_apply = init_apply_eqx_model(rec_model, batchnorm=True)
+    gen_init, gen_apply = init_apply_eqx_model(gen_model, batchnorm=True, input_dim=latent_dim)
+    rec_init, rec_apply = init_apply_eqx_model(rec_model, batchnorm=True, input_dim=data_dim)
 
     engine: AevbEngine = Aevb(
         latent_dim=latent_dim,

@@ -13,13 +13,37 @@ State = eqx.nn._stateful.State
 def batch_model(model: eqx.Module, batchnorm: bool) -> Callable:
     if batchnorm:
         # see BatchNorm: https://docs.kidger.site/equinox/api/nn/normalisation/
-        return jax.vmap(model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")
+        # Across typical batch dimension
+        first_vmap = jax.vmap(model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")
+        # Across n_samples dimension
+        second_vmap = jax.vmap(first_vmap, in_axes=(0, None), out_axes=(0, None), axis_name="batch2")
+        return second_vmap
     else:
-        return jax.vmap(model, in_axes=(0, None), out_axes=(0, None))
+        # Across typical batch dimension
+        first_vmap = jax.vmap(model, in_axes=(0, None), out_axes=(0, None))
+        # Across n_samples dimension
+        second_vmap = jax.vmap(first_vmap, in_axes=(0, None), out_axes=(0, None))
+        return second_vmap
+
+
+def _maybe_modify_input_ndim(input, input_dim):
+    if isinstance(input_dim, int):
+        data_ndim = 1
+    else:
+        data_ndim = len(input_dim)
+    # input has [n_samples, batch, ...] we're good.
+    if input.ndim - data_ndim == 2:
+        return input, False
+    # input has [batch, ...]
+    elif input.ndim - data_ndim == 1:
+        return jnp.expand_dims(input, axis=0), True
+    else:
+        raise ValueError("Input to `apply` function from equinox must either have shape [n_samples, batch, ...] or [batch, ...]")
+    
 
 
 def init_apply_eqx_model(
-    model: tuple[Any, State], batchnorm: bool
+    model: tuple[Any, State], batchnorm: bool, input_dim: Union[int, tuple[int, ...]]
 ) -> tuple[Callable, Callable]:
     model, state = model
     params, static = eqx.partition(model, eqx.is_inexact_array)
@@ -28,13 +52,15 @@ def init_apply_eqx_model(
         return params, state
 
     def apply(params, state, input, train: bool):
+        input, squeeze = _maybe_modify_input_ndim(input, input_dim)
         model = eqx.combine(params, static)
         batched_model = batch_model(model, batchnorm)
         if not train:
             model = eqx.nn.inference_mode(model)
         out, updates = batched_model(input, state)
+        if squeeze:
+            out = {k: jnp.squeeze(v, axis=0) for k,v in out.items()}
         return out, updates
-
     return init, apply
 
 
@@ -76,7 +102,7 @@ class MLP(eqx.Module):
 
             if idx in batchnorm_idx:
                 batchnorm_layer = eqx.nn.BatchNorm(
-                    input_size=hidden[idx], axis_name="batch"
+                    input_size=hidden[idx], axis_name=("batch", "batch2")
                 )
                 layers.append(batchnorm_layer)
             if idx in act_idx:
