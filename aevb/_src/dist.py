@@ -107,8 +107,16 @@ class normal:
 
 class laplace:
 
-    def logpdf(x, loc, scale): ...
+    def logpdf(x, loc, scale):
+        return stats.laplace.logpdf(x, loc, scale).sum()
+    
+    def sample(key, loc, scale, shape=()):
+        return scale * jax.random.laplace(key, shape=shape) + loc
 
+    def reparam_sample(key, loc, scale, n_samples):
+        return loc_scale_reparam_sample(standard_samplers["laplace"])(
+            key, loc, scale, n_samples
+        )
 
 laplace = loc_scale(laplace, name="laplace")
 

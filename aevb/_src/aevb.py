@@ -7,9 +7,9 @@ import optax
 from jax.tree_util import tree_leaves
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
+from functools import partial
 
 from aevb._src import dist
-from aevb._src.dist import normal
 
 ArrayTree = Union[jax.Array, Iterable["ArrayTree"], Mapping[Any, "ArrayTree"]]
 ArrayLikeTree = Union[
@@ -17,10 +17,12 @@ ArrayLikeTree = Union[
 ]
 
 
-builtin_priors = {"unit_normal": dist.set_params(normal, loc=0, scale=1)}
+builtin_priors = {"unit_normal": dist.set_params(dist.normal, loc=0, scale=1)}
 
 builtin_dists = {
-    "normal": normal,
+    "normal": dist.normal,
+    "laplace": dist.laplace,
+    "student_t": dist.student_t,
 }
 
 
@@ -76,7 +78,7 @@ class AevbEngine(NamedTuple):
     step: Callable[[random.key, AevbState, ArrayLike], tuple[AevbState, AevbInfo]]
 
 
-def unit_normal_kl(z, loc, scale):
+def _unit_normal_kl(_, loc, scale):
     """As per Appendix B of [1]"""
 
     def kl(mu, sigma):
@@ -87,6 +89,11 @@ def unit_normal_kl(z, loc, scale):
     kl_tree = jax.tree_map(kl, loc, scale)
     kl_val = sum([param_kl.sum() for param_kl in tree_leaves(kl_tree)])
     return kl_val
+
+
+def _approx_kl(z, prior_logpdf, variational_logpdf, **z_params):
+    return variational_logpdf(z, **z_params)-prior_logpdf(z)
+
 
 
 def _encode_and_sample(
@@ -113,7 +120,7 @@ def _decode(
     return x_params, upd_gen_state
 
 
-def _analytical_kl_step(
+def _step(
     rng_key: random.key,
     rec_params: ArrayLikeTree,
     rec_state: ArrayLikeTree,
@@ -144,7 +151,7 @@ def _analytical_kl_step(
         x_params, upd_gen_state = _decode(gen_params, gen_state, gen_apply, z)
 
         # ----- Compute losses -----
-        # Analytical KL loss
+        # KL loss
         kl = kl_fn(z, **z_params)
 
         # x is [batch_size, data_dim]
@@ -187,37 +194,37 @@ def make_step(
 
     # If not analytical KL, need to divide by number of samples afterward
     # as in the original paper.
-    if kl_fn not in [unit_normal_kl]:
+    if kl_fn not in [_unit_normal_kl]:
         _kl_fn = lambda z, **z_params: kl_fn(z, **z_params) / n_samples
     else:
         _kl_fn = kl_fn
 
-        def step(rng_key, aevb_state, x) -> tuple[AevbState, AevbInfo]:
-            (
-                (rec_params, rec_state),
-                (gen_params, gen_state),
-                opt_state,
-            ), (loss_val, nll, kl) = _analytical_kl_step(
-                rng_key,
-                aevb_state.rec_params,
-                aevb_state.rec_state,
-                aevb_state.gen_params,
-                aevb_state.gen_state,
-                aevb_state.opt_state,
-                x,
-                rec_apply,
-                rec_sample,
-                gen_apply,
-                gen_logpdf,
-                _kl_fn,
-                optimizer,
-                n_samples,
-            )
-            return AevbState(
-                rec_params, rec_state, gen_params, gen_state, opt_state
-            ), AevbInfo(loss_val, nll, kl)
+    def step(rng_key, aevb_state, x) -> tuple[AevbState, AevbInfo]:
+        (
+            (rec_params, rec_state),
+            (gen_params, gen_state),
+            opt_state,
+        ), (loss_val, nll, kl) = _step(
+            rng_key,
+            aevb_state.rec_params,
+            aevb_state.rec_state,
+            aevb_state.gen_params,
+            aevb_state.gen_state,
+            aevb_state.opt_state,
+            x,
+            rec_apply,
+            rec_sample,
+            gen_apply,
+            gen_logpdf,
+            _kl_fn,
+            optimizer,
+            n_samples,
+        )
+        return AevbState(
+            rec_params, rec_state, gen_params, gen_state, opt_state
+        ), AevbInfo(loss_val, nll, kl)
 
-        return step
+    return step
 
 
 def _convert_gen_prior(dist: Union[str, Callable]) -> GenPrior:
@@ -261,13 +268,9 @@ def _convert_rec_dist(dist: Union[str, tuple[Callable, Callable]]) -> RecDist:
 
 def _create_kl_fn(prior: GenPrior, dist: RecDist) -> Callable:
     if prior.name == "unit_normal" and dist.name == "normal":
-        return unit_normal_kl
+        return _unit_normal_kl
     else:
-
-        def kl_fn(z, **params):
-            return prior.logpdf(z) - dist.logpdf(z, **params)
-
-        return kl_fn
+        return partial(_approx_kl, prior_logpdf=prior.logpdf, variational_logpdf=dist.logpdf)
 
 
 class Aevb:
@@ -296,6 +299,7 @@ class Aevb:
         gen_obs_dist: GenObsDist = cls.convert_gen_obs_dist(gen_obs_dist)
         rec_dist: RecDist = cls.convert_rec_dist(rec_dist)
         kl_fn: Callable = cls.create_kl_fn(gen_prior, rec_dist)
+        print(kl_fn)
 
         gen_model: AevbGenModel = AevbGenModel(
             prior=gen_prior,

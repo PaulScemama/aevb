@@ -103,7 +103,7 @@ def main(save_samples_pth: str):
         gen_obs_dist="normal",
         gen_apply=gen_apply,
         gen_init=gen_init,
-        rec_dist="normal",
+        rec_dist="laplace",
         rec_apply=rec_apply,
         rec_init=rec_init,
         optimizer=optimizer,
@@ -112,7 +112,7 @@ def main(save_samples_pth: str):
 
     # Run AEVB
     key = random.key(1242)
-    num_steps = 1000
+    num_steps = 4000
     eval_every = 100
 
     key, subkey1, subkey2 = random.split(key, 3)
