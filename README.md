@@ -21,8 +21,9 @@ The purpose of this package is to provide a simple (but general) implementation 
 
 ### KL Support
 - [x] Support for analytical KL term for normal prior and normal recognition model distribution. 
+- [x] Support for intractable KL term.
 - [ ] Support for analytical KL term for other prior and recognition model distributions.
-- [ ] Support for intractable KL term.
+
 
 
 ## Auto-Encoding Variational Bayes (AEVB)
