@@ -10,22 +10,6 @@ from jax.random import PRNGKey
 State = eqx.nn._stateful.State
 
 
-def batch_model(model: eqx.Module, batchnorm: bool) -> Callable:
-    if batchnorm:
-        # see BatchNorm: https://docs.kidger.site/equinox/api/nn/normalisation/
-        # Across typical batch dimension
-        first_vmap = jax.vmap(model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")
-        # Across n_samples dimension
-        second_vmap = jax.vmap(first_vmap, in_axes=(0, None), out_axes=(0, None), axis_name="batch2")
-        return second_vmap
-    else:
-        # Across typical batch dimension
-        first_vmap = jax.vmap(model, in_axes=(0, None), out_axes=(0, None))
-        # Across n_samples dimension
-        second_vmap = jax.vmap(first_vmap, in_axes=(0, None), out_axes=(0, None))
-        return second_vmap
-
-
 def _maybe_modify_input_ndim(input, input_dim):
     if isinstance(input_dim, int):
         data_ndim = 1
@@ -40,6 +24,21 @@ def _maybe_modify_input_ndim(input, input_dim):
     else:
         raise ValueError("Input to `apply` function from equinox must either have shape [n_samples, batch, ...] or [batch, ...]")
     
+
+def batch_model(model: eqx.Module, batchnorm: bool) -> Callable:
+    if batchnorm:
+        # see BatchNorm: https://docs.kidger.site/equinox/api/nn/normalisation/
+        # Across typical batch dimension
+        first_vmap = jax.vmap(model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")
+        # Across n_samples dimension
+        second_vmap = jax.vmap(first_vmap, in_axes=(0, None), out_axes=(0, None), axis_name="batch2")
+        return second_vmap
+    else:
+        # Across typical batch dimension
+        first_vmap = jax.vmap(model, in_axes=(0, None), out_axes=(0, None))
+        # Across n_samples dimension
+        second_vmap = jax.vmap(first_vmap, in_axes=(0, None), out_axes=(0, None))
+        return second_vmap
 
 
 def init_apply_eqx_model(
