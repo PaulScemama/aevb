@@ -66,43 +66,121 @@ In order to use `aevb`, the user must define...
 The `gen_apply` and `rec_apply` callables need to have a specific signature and form in order to work with `aevb`:
 
 The signature can be represented like so:
-```python
-def apply(params: ArrayLikeTree, state: ArrayLikeTree, input: ArrayLike, train: bool): -> tuple[Dict[str, Array], ArrayLikeTree]
-```
-
-The `apply` function should apply parameters and a (optional) state to an input in order to produce a tuple consisting of the output and a (optional) updated state. The `train` boolean flag is for the purpose of possibly updating the state. This is a common pattern in the `flax` library. An example of a `state` is the current values for the Batchnorm statistics. If no state is needed, then one can bind an empty dictionary to `state` as well as to the second element of the output tuple. 
-
-Another restriction on `apply` is that the first element of the output tuple is a dictionary mapping string keys to `jax` Arrays. *These keys need to correspond to the* `_dist` *of the encoder/decoder*. That is, for the `gen_apply`, the keys need to correspond to the input arguments of `gen_obs_dist` logpdf callable.
-
-
-### Restrictions on `init`
-The `gen_init` and `rec_init` callables need only have a specific output form in order to work with `aevb`. That is, they both need to return a tuple of `params, state`. Again, if the `state` is not needed this can be an empty dictionary `{}`. 
-
-### Using Flax Modules for Encoder/Decoder
-`aevb` provides functions that convert `flax` modules into `init/apply` functions that conform with the above specifications. The only restriction is that the `__call__` method of the `flax` module has a `train: bool` input argument. It is not required that it used in the method, however. Here is a simple example.
 
 ```python
 import jax
+from jax.typing import ArrayLike
+
+ArrayTree = jax.Array | Iterable["ArrayTree"] | Mapping[Any, "ArrayTree"]
+ArrayLikeTree = ArrayLike | Iterable["ArrayLikeTree"] | Mapping[Any, "ArrayLikeTree"]
+
+def apply(
+    params: ArrayLikeTree, 
+    state: ArrayLikeTree, 
+    input: ArrayLike, 
+    train: bool
+): -> tuple[Dict[str, Array], ArrayLikeTree]
+    ...
+    return out, state
+
+```
+
+- The `apply` function should apply parameters and a (optional) state to an input in order to produce a tuple consisting of the output and an (optional) updated state. The `train` boolean flag is for the purpose of possibly updating the state. This is a common pattern in the `flax` library. 
+- An example of a `state` is a representation ofthe current values for the Batchnorm statistics. 
+- If no state is needed, then one can bind an empty dictionary to `state` as well as to the second element of the output tuple. 
+
+Another restriction on `apply` is that the first element of the output tuple is a dictionary mapping string keys to `jax` Arrays. *These keys need to correspond to the* `*_dist` *of the encoder/decoder*. 
+- That is, for the `gen_apply`, the keys need to correspond to the input arguments of `gen_obs_dist` logpdf callable.
+
+
+### Restrictions on `init`
+The `gen_init` and `rec_init` callables need only have a specific output form in order to work with `aevb`. That is, they both need to return a tuple consisting of `params, state`. Similarly, if the `state` is not needed this can be an empty dictionary `{}`. 
+
+### Using Flax Modules for Encoder/Decoder
+`aevb` provides functions that convert `flax` modules into `init/apply` functions that conform with the above specifications. The only restriction is that the `__call__` method of the `flax` module has a `train: bool` input argument. It is not required that this `train` arg is actually used in the method, however. Here is a simple example.
+
+```python
 import jax.numpy as jnp
+import jax.random as random
 import flax.linen as nn
-from aevb.flax_utils import init_apply_flax_model
+from aevb.flax_util import init_apply_flax_model
 
 class Mlp(nn.Module):
     @nn.compact
     def __call__(self, x, train: bool = False):
-        x = nn.Dense(14, x)(x)
+        x = nn.Dense(7)(x)
+        x = nn.Dense(1)(x)
+        return {"x": x}
 
 mlp = Mlp()
 init, apply = init_apply_flax_model(mlp)
+params, state = init(random.key(0), jnp.ones(6))
+apply(params, state, jnp.ones((10, 6)), train=True)
+# ({'x': Array([[0.9643452],
+#          [0.9643452],
+#          [0.9643452],
+#          [0.9643452],
+#          [0.9643452],
+#          [0.9643452],
+#          [0.9643452],
+#          [0.9643452],
+#          [0.9643452],
+#          [0.9643452]], dtype=float32)},
+#  {})
 ```
+- Note how when converting a `flax.nn.Module` to `init/apply`, the `init` requires a random key and an array with the same shape as the data. 
 
 ### Using Equinox Modules for Encoder/Decoder
+`aevb` provides functions that convert `equinox` modules into `init/apply` functions that conform with our specifications. The only restrictions are:
 
-1.  `__call__` should only have `x, state` as arguments, thus all layer instantiation should be done in `__init__` since they require a random key for initialization.
+1. The `__call__` method should only have `x, state` as arguments, thus all layer instantiation should be done in `__init__`. Here is a simple example.
+2. The module should be transformed by `equinox.nn.make_with_state`. This can conveniently done with a decorator (see following example)
 
+Here is a simple example.
+
+```python
+import jax.numpy as jnp
+import jax.random as random
+import equinox as eqx
+from aevb.equinox_util import init_apply_eqx_model
+
+@eqx.nn.make_with_state
+class mlp(eqx.Module):
+    l1: eqx.nn.Linear
+    l2: eqx.nn.Linear
+
+    def __init__(self, key: random.key):
+        l1_key, l2_key = random.split(key)
+        self.l1 = eqx.nn.Linear(in_features=6, out_features=7, key=l1_key)
+        self.l2 = eqx.nn.Linear(in_features=7, out_features=1, key=l2_key)
+
+    def __call__(self, x, state):
+        x = self.l1(x)
+        x = self.l2(x)
+        return {"x": x}, state
+
+model = mlp(random.key(0))
+init, apply = init_apply_eqx_model(model, batchnorm=False, input_dim=6)
+params, state = init()
+apply(params, state, jnp.ones((10, 6)), train=False)
+# ({'x': Array([[0.3000745],
+#          [0.3000745],
+#          [0.3000745],
+#          [0.3000745],
+#          [0.3000745],
+#          [0.3000745],
+#          [0.3000745],
+#          [0.3000745],
+#          [0.3000745],
+#          [0.3000745]], dtype=float32)},
+#  State())
+```
+
+- Note how when converting from an `equinox.Module`, the `init` takes no input arguments.
 
 ### Using Haiku Modules for Encoder/Decoder
 
+Work in progress...
 
 
 ## Installation
