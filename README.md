@@ -3,6 +3,21 @@
 # Autoencoding Variational Bayes
 Applying the AEVB Estimator to Latent Variable Models
 
+## Table of Contents
+1. [Overview](#overview)
+    1. [Interoperability](#interoperability)
+    2. [Distribution Support](#distribution-support)
+    3. [KL Support](#kl-support)
+2. [Auto-Encoding Variational Bayes (AEVB)](#auto-encoding-variational-bayes-aevb)
+3. [How to Use](#how-to-use)
+    1. [Restrictions on `apply`](#restrictions-on-apply)
+    2. [Restrictions on `init`](#restrictions-on-init)
+    3. [Using Flax Modules for Encoder/Decoder](#using-flax-modules-for-encoderdecoder)
+    4. [Using Equinox Modules for Encoder/Decoder](#using-equinox-modules-for-encoderdecoder)
+    5. [Using Haiku Modules for Encoder/Decoder](#using-haiku-modules-for-encoderdecoder)
+4. [User Install](#user-install)
+5. [Developer Install](#developer-install)
+
 ## Overview
 
 The purpose of this package is to provide a simple (but general) implementation of the Auto-Encoding Variational Bayes (AEVB) inference algorithm ([Kingma et. al, 2014](https://arxiv.org/abs/1312.6114)) as well as a composable and interoperable interface for the implementation.
@@ -13,7 +28,7 @@ The purpose of this package is to provide a simple (but general) implementation 
 - [x] Equinox modules for the initialization and encoder/decoder mappings.
 - [ ] Haiku modules for the initialization and encoder/decoder mappings.
 
-### Gradient Estimator Support
+### Distribution Support
 - [x] Reparameterization trick support for loc/scale distribution families.
 - [ ] Reparameterization trick support for tractable inverse CDF distribution families.
 - [ ] Reparameterization trick support for composable distribution families.
@@ -52,11 +67,11 @@ In order to use `aevb`, the user must define...
 | ----------------| -------------- | --------------- |
 | `latent_dim` | `int` | The dimension of the latent variable $z$.|
 |`data_dim` | `int` | The dimension of the data $x$.| 
-| `gen_prior`| `Union[str, Callable]` | The logpdf function of a prior distribution over continuous latent variable $z$, or a string corresponding to a built-in prior.|
-|`gen_obs_dist`| `Union[str, Callable]`| The logpdf function of a distribution over the data $x$, or a string corresponding to a built-in distribution.|
+| `gen_prior`| `str \| Callable` | The logpdf function of a prior distribution over continuous latent variable $z$, or a string corresponding to a built-in prior.|
+|`gen_obs_dist`| `str \| Callable`| The logpdf function of a distribution over the data $x$, or a string corresponding to a built-in distribution.|
 | `gen_apply` |`Callable`|A function mapping learnable parameters and latent variable $z$ to the parameters of the `obs_dist`.|
 | `gen_init`| `Callable`| An initialization for the parameters and state that will be passed into `gen_apply`.| 
-|`rec_dist`| `Union[str, tuple[Callable, Callable]]`| The logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$, or a string corresopnding to a built-in distribution.|
+|`rec_dist`| `str \| tuple[Callable, Callable]`| The logpdf function and reparameterized sample function of a distribution over continuous latent variable $z$, or a string corresopnding to a built-in distribution.|
 |`rec_apply`|  `Callable` |A function mapping learnable parameters and data variable $x$ to the parameters of the `rec_dist`.|
 |`rec_init` |`Callable`| An initialization for the parameters and state that will be passed into `rec_apply`.| 
 |`optimizer`| `GradientTransformation`| An `optax` optimizer.|
