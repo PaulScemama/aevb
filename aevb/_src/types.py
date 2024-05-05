@@ -1,9 +1,10 @@
-from typing import Any, Iterable, Mapping, Union
+from __future__ import annotations
+
+from typing import Any, Iterable, Mapping
 
 import jax
 from jax.typing import ArrayLike
 
-ArrayTree = Union[jax.Array, Iterable["ArrayTree"], Mapping[Any, "ArrayTree"]]
-ArrayLikeTree = Union[
-    ArrayLike, Iterable["ArrayLikeTree"], Mapping[Any, "ArrayLikeTree"]
-]
+ArrayTree = jax.Array | Iterable["ArrayTree"] | Mapping[Any, "ArrayTree"]
+ArrayLikeTree = ArrayLike | Iterable["ArrayLikeTree"] | Mapping[Any, "ArrayLikeTree"]
+

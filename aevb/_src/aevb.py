@@ -1,4 +1,6 @@
-from typing import Any, Callable, Iterable, Mapping, NamedTuple, Union
+from __future__ import annotations
+
+from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -10,11 +12,7 @@ from optax import GradientTransformation, OptState
 from functools import partial
 
 from aevb._src import dist
-
-ArrayTree = Union[jax.Array, Iterable["ArrayTree"], Mapping[Any, "ArrayTree"]]
-ArrayLikeTree = Union[
-    ArrayLike, Iterable["ArrayLikeTree"], Mapping[Any, "ArrayLikeTree"]
-]
+from aevb._src.types import ArrayLike, ArrayLikeTree
 
 
 builtin_priors = {"unit_normal": dist.set_params(dist.normal, loc=0, scale=1)}
@@ -70,11 +68,11 @@ class AevbInfo(NamedTuple):
 
 class AevbEngine(NamedTuple):
     latent_dim: int
-    data_dim: Union[tuple, int]
+    data_dim: int | tuple
     gen_model: AevbGenModel
     rec_model: AevbRecModel
 
-    init: Callable  # Union[Callable[[random.key, tuple[int]], AevbState], Callable[[]], AevbState]
+    init: Callable  
     step: Callable[[random.key, AevbState, ArrayLike], tuple[AevbState, AevbInfo]]
 
 
@@ -227,11 +225,11 @@ def make_step(
     return step
 
 
-def _convert_gen_prior(dist: Union[str, Callable]) -> GenPrior:
+def _convert_gen_prior(dist: str | Callable) -> GenPrior:
     if isinstance(dist, str):
         name = dist
         dist = builtin_priors[dist]
-        logpdf, sample = dist.logpdf, dist.sample
+        logpdf = dist.logpdf
     elif isinstance(dist, Callable):
         name = None
         logpdf = dist
@@ -241,7 +239,7 @@ def _convert_gen_prior(dist: Union[str, Callable]) -> GenPrior:
 
 
 def _convert_gen_obs_dist(
-    dist: Union[str, Callable, tuple[Callable, Callable]]
+    dist: str | Callable 
 ) -> GenObsDist:
     if isinstance(dist, str):
         dist = builtin_dists[dist]
@@ -253,7 +251,7 @@ def _convert_gen_obs_dist(
     return GenObsDist(logpdf)
 
 
-def _convert_rec_dist(dist: Union[str, tuple[Callable, Callable]]) -> RecDist:
+def _convert_rec_dist(dist: str | tuple[Callable, Callable]) -> RecDist:
     if isinstance(dist, str):
         dist_name = dist
         dist = builtin_dists[dist]
@@ -285,11 +283,11 @@ class Aevb:
         cls,
         latent_dim: int,
         data_dim: int,
-        gen_prior: Union[str, Callable, tuple[Callable, Callable]],
-        gen_obs_dist: Union[str, Callable, tuple[Callable, Callable]],
+        gen_prior: str | Callable,
+        gen_obs_dist: str | Callable,
         gen_apply: Callable,
         gen_init: Callable,
-        rec_dist: Union[str, tuple[Callable, Callable]],
+        rec_dist: str | tuple[Callable, Callable],
         rec_apply: Callable,
         rec_init: Callable,
         optimizer: GradientTransformation,

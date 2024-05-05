@@ -1,11 +1,11 @@
-import inspect
-from typing import Any, Callable, Dict, List, Union
+from __future__ import annotations
+
+from typing import Any, Callable, Dict, List
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as random
-from jax.random import PRNGKey
 
 State = eqx.nn._stateful.State
 
@@ -42,7 +42,7 @@ def batch_model(model: eqx.Module, batchnorm: bool) -> Callable:
 
 
 def init_apply_eqx_model(
-    model: tuple[Any, State], batchnorm: bool, input_dim: Union[int, tuple[int, ...]]
+    model: tuple[Any, State], batchnorm: bool, input_dim: int | tuple[int, ...]
 ) -> tuple[Callable, Callable]:
     model, state = model
     params, static = eqx.partition(model, eqx.is_inexact_array)
@@ -77,7 +77,7 @@ class MLP(eqx.Module):
         hidden: List[int],
         activation: tuple[Callable, List[int]],
         batchnorm_idx: List[int],
-        output_heads: Dict[str, Union[int, tuple[int, callable]]],
+        output_heads: Dict[str, int | tuple[int, callable]],
     ):
 
         keys = random.split(key, len(hidden) + 1)
