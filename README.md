@@ -160,7 +160,7 @@ import equinox as eqx
 from aevb.equinox_util import init_apply_eqx_model
 
 @eqx.nn.make_with_state
-class mlp(eqx.Module):
+class Mlp(eqx.Module):
     l1: eqx.nn.Linear
     l2: eqx.nn.Linear
 
@@ -174,7 +174,7 @@ class mlp(eqx.Module):
         x = self.l2(x)
         return {"x": x}, state
 
-model = mlp(random.key(0))
+model = Mlp(random.key(0))
 init, apply = init_apply_eqx_model(model, batchnorm=False, input_dim=6)
 params, state = init()
 apply(params, state, jnp.ones((10, 6)), train=False)
