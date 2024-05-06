@@ -127,8 +127,12 @@ def main(save_samples_pth: str):
     data_dim = 784
     optimizer = optax.adam(1e-3)
 
-    dec_init, dec_apply = init_apply_eqx_model(decoder, batchnorm=True, input_dim=latent_dim)
-    enc_init, enc_apply = init_apply_eqx_model(encoder, batchnorm=True, input_dim=data_dim)
+    dec_init, dec_apply = init_apply_eqx_model(
+        decoder, batchnorm=True, input_dim=latent_dim
+    )
+    enc_init, enc_apply = init_apply_eqx_model(
+        encoder, batchnorm=True, input_dim=data_dim
+    )
 
     engine: AevbEngine = Aevb(
         latent_dim=latent_dim,

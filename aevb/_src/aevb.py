@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable, NamedTuple
 
 import jax
@@ -7,11 +8,9 @@ import optax
 from jax.tree_util import tree_leaves
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
-from functools import partial
 
 from aevb._src import dist
-from aevb._src.types import ArrayLike, ArrayTree, ArrayLikeTree
-
+from aevb._src.types import ArrayLike, ArrayLikeTree, ArrayTree
 
 builtin_priors = {"unit_normal": dist.set_params(dist.normal, loc=0, scale=1)}
 
@@ -41,7 +40,7 @@ class AevbGenModel(NamedTuple):
     prior: Prior
     obs_dist: ObsDist
     dec_apply: callable
-    dec_init: callable 
+    dec_init: callable
 
 
 class AevbRecModel(NamedTuple):
@@ -88,8 +87,7 @@ def _unit_normal_kl(_, loc, scale):
 
 
 def _approx_kl(z, prior_logpdf, variational_logpdf, **z_params):
-    return variational_logpdf(z, **z_params)-prior_logpdf(z)
-
+    return variational_logpdf(z, **z_params) - prior_logpdf(z)
 
 
 def _encode_and_sample(
@@ -134,14 +132,16 @@ def _step(
 ) -> tuple[
     tuple[ArrayLikeTree, ArrayLikeTree, ArrayLikeTree], tuple[float, float, float]
 ]:
-    
+
     def loss_fn(
         enc_params: ArrayLikeTree, dec_params: ArrayLikeTree
     ) -> tuple[float, tuple[float, float]]:
 
         # ----- Encode and Decode ----
         # z: [n_samples, batch, latent_dim]
-        z, z_params, upd_enc_state = _encode_and_sample(rng_key, enc_params, enc_state, x, enc_apply, variational_sample, n_samples)
+        z, z_params, upd_enc_state = _encode_and_sample(
+            rng_key, enc_params, enc_state, x, enc_apply, variational_sample, n_samples
+        )
 
         # Each x_param is [n_samples, batch_size, ...]
         x_params, upd_dec_state = _decode(dec_params, dec_state, dec_apply, z)
@@ -236,9 +236,7 @@ def _convert_prior(dist: str | Callable) -> Prior:
     return Prior(logpdf, name)
 
 
-def _convert_obs_dist(
-    dist: str | Callable 
-) -> ObsDist:
+def _convert_obs_dist(dist: str | Callable) -> ObsDist:
     if isinstance(dist, str):
         dist = builtin_dists[dist]
         logpdf = dist.logpdf
@@ -266,7 +264,9 @@ def _create_kl_fn(prior: Prior, dist: VariationalDist) -> Callable:
     if prior.name == "unit_normal" and dist.name == "normal":
         return _unit_normal_kl
     else:
-        return partial(_approx_kl, prior_logpdf=prior.logpdf, variational_logpdf=dist.logpdf)
+        return partial(
+            _approx_kl, prior_logpdf=prior.logpdf, variational_logpdf=dist.logpdf
+        )
 
 
 class Aevb:
@@ -293,7 +293,9 @@ class Aevb:
     ):
         prior: Prior = cls.convert_prior(prior)
         obs_dist: ObsDist = cls.convert_obs_dist(obs_dist)
-        variational_dist: VariationalDist = cls.convert_variational_dist(variational_dist)
+        variational_dist: VariationalDist = cls.convert_variational_dist(
+            variational_dist
+        )
         kl_fn: Callable = cls.create_kl_fn(prior, variational_dist)
 
         gen_model: AevbGenModel = AevbGenModel(

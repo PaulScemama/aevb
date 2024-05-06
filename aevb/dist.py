@@ -1,1 +1,1 @@
-from aevb._src.dist import normal, laplace
+from aevb._src.dist import laplace, normal

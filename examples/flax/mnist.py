@@ -96,7 +96,6 @@ def main(save_samples_pth: str):
     enc_init, enc_apply = init_apply_flax_model(encoder)
     dec_init, dec_apply = init_apply_flax_model(decoder)
 
-
     engine: AevbEngine = Aevb(
         latent_dim=latent_dim,
         data_dim=data_dim,

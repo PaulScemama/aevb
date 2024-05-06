@@ -20,16 +20,22 @@ def _maybe_modify_input_ndim(input, input_dim):
     elif input.ndim - data_ndim == 1:
         return jnp.expand_dims(input, axis=0), True
     else:
-        raise ValueError("Input to `apply` function from equinox must either have shape [n_samples, batch, ...] or [batch, ...]")
-    
+        raise ValueError(
+            "Input to `apply` function from equinox must either have shape [n_samples, batch, ...] or [batch, ...]"
+        )
+
 
 def batch_model(model: eqx.Module, batchnorm: bool) -> Callable:
     if batchnorm:
         # see BatchNorm: https://docs.kidger.site/equinox/api/nn/normalisation/
         # Across typical batch dimension
-        first_vmap = jax.vmap(model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")
+        first_vmap = jax.vmap(
+            model, in_axes=(0, None), out_axes=(0, None), axis_name="batch"
+        )
         # Across n_samples dimension
-        second_vmap = jax.vmap(first_vmap, in_axes=(0, None), out_axes=(0, None), axis_name="batch2")
+        second_vmap = jax.vmap(
+            first_vmap, in_axes=(0, None), out_axes=(0, None), axis_name="batch2"
+        )
         return second_vmap
     else:
         # Across typical batch dimension
@@ -56,8 +62,9 @@ def init_apply_eqx_model(
             model = eqx.nn.inference_mode(model)
         out, updates = batched_model(input, state)
         if squeeze:
-            out = {k: jnp.squeeze(v, axis=0) for k,v in out.items()}
+            out = {k: jnp.squeeze(v, axis=0) for k, v in out.items()}
         return out, updates
+
     return init, apply
 
 

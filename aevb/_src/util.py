@@ -31,7 +31,9 @@ def encode(
     z_params, _ = rec_model.apply(
         aevb_state.enc_params, aevb_state.enc_state, x, train=False
     )
-    return rec_model.variational_dist.reparam_sample(key, **z_params, n_samples=n_samples)
+    return rec_model.variational_dist.reparam_sample(
+        key, **z_params, n_samples=n_samples
+    )
 
 
 def decode(
