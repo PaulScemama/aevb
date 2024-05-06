@@ -40,7 +40,7 @@ def data_stream(seed, data, batch_size, data_size):
 
 
 # Generative Model and Recognition Feature Extractor --------------------
-class GenModel(nn.Module):
+class Decoder(nn.Module):
     @nn.compact
     def __call__(self, x, train: bool = False):
         x = nn.Dense(features=128)(x)
@@ -52,7 +52,7 @@ class GenModel(nn.Module):
         return {"loc": x, "scale": jnp.ones_like(x) * 0.1}
 
 
-class RecModel(nn.Module):
+class Encoder(nn.Module):
     latent_dim: int
 
     @nn.compact
@@ -89,23 +89,24 @@ def main(save_samples_pth: str):
     # Create AEVB inference engine
     data_dim = 784
     latent_dim = 4
-    gen_model = GenModel()
-    rec_model = RecModel(latent_dim)
+    decoder = Decoder()
+    encoder = Encoder(latent_dim)
     optimizer = optax.adam(1e-3)
 
-    gen_init, gen_apply = init_apply_flax_model(gen_model)
-    rec_init, rec_apply = init_apply_flax_model(rec_model)
+    enc_init, enc_apply = init_apply_flax_model(encoder)
+    dec_init, dec_apply = init_apply_flax_model(decoder)
+
 
     engine: AevbEngine = Aevb(
         latent_dim=latent_dim,
         data_dim=data_dim,
-        gen_prior="unit_normal",
-        gen_obs_dist="normal",
-        gen_apply=gen_apply,
-        gen_init=gen_init,
-        rec_dist="laplace",
-        rec_apply=rec_apply,
-        rec_init=rec_init,
+        enc_apply=enc_apply,
+        enc_init=enc_init,
+        dec_apply=dec_apply,
+        dec_init=dec_init,
+        variational_dist="laplace",
+        prior="unit_normal",
+        obs_dist="normal",
         optimizer=optimizer,
         n_samples=5,
     )
@@ -117,8 +118,8 @@ def main(save_samples_pth: str):
 
     key, subkey1, subkey2 = random.split(key, 3)
     aevb_state: AevbState = engine.init(
-        gen_init_args=(subkey1, jnp.ones(latent_dim)),
-        rec_init_args=(subkey2, jnp.ones(data_dim)),
+        dec_init_args=(subkey1, jnp.ones(latent_dim)),
+        enc_init_args=(subkey2, jnp.ones(data_dim)),
     )
 
     key, *training_keys = random.split(key, num_steps + 1)

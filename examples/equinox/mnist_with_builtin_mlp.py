@@ -39,7 +39,7 @@ def data_stream(seed, data, batch_size, data_size):
             yield data[batch_idx]
 
 
-rec_model = MLP(
+encoder = MLP(
     random.key(0),
     in_dim=784,
     hidden=[512, 512, 256, 128, 64],
@@ -50,7 +50,7 @@ rec_model = MLP(
     output_heads={"loc": 4, "scale": (4, lambda x: jnp.exp(0.5 * x))},
 )
 
-gen_model = MLP(
+decoder = MLP(
     random.key(1),
     in_dim=4,
     hidden=[128, 128, 256, 64],
@@ -82,19 +82,19 @@ def main(save_samples_pth: str):
     data_dim = 784
     optimizer = optax.adam(1e-3)
 
-    gen_init, gen_apply = init_apply_eqx_model(gen_model, batchnorm=True)
-    rec_init, rec_apply = init_apply_eqx_model(rec_model, batchnorm=True)
+    dec_init, dec_apply = init_apply_eqx_model(decoder, batchnorm=True, input_dim=latent_dim)
+    enc_init, enc_apply = init_apply_eqx_model(encoder, batchnorm=True, input_dim=data_dim)
 
     engine: AevbEngine = Aevb(
         latent_dim=latent_dim,
         data_dim=data_dim,
-        gen_prior="unit_normal",
-        gen_obs_dist="normal",
-        gen_apply=gen_apply,
-        gen_init=gen_init,
-        rec_dist="normal",
-        rec_apply=rec_apply,
-        rec_init=rec_init,
+        enc_apply=enc_apply,
+        enc_init=enc_init,
+        dec_apply=dec_apply,
+        dec_init=dec_init,
+        prior="unit_normal",
+        obs_dist="normal",
+        variational_dist="normal",
         optimizer=optimizer,
         n_samples=5,
     )
@@ -104,7 +104,7 @@ def main(save_samples_pth: str):
     num_steps = 3000
     eval_every = 100
 
-    aevb_state: AevbState = engine.init(gen_init_args=(), rec_init_args=())
+    aevb_state: AevbState = engine.init(dec_init_args=(), enc_init_args=())
 
     key, *training_keys = random.split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):

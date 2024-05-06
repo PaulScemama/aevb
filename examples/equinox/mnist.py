@@ -40,7 +40,7 @@ def data_stream(seed, data, batch_size, data_size):
 
 
 @eqx.nn.make_with_state
-class RecModel(eqx.Module):
+class Encoder(eqx.Module):
 
     latent_dim: int
     layers: list
@@ -79,7 +79,7 @@ class RecModel(eqx.Module):
 
 
 @eqx.nn.make_with_state
-class GenModel(eqx.Module):
+class Decoder(eqx.Module):
 
     latent_dim: int
     layers: list
@@ -121,25 +121,25 @@ def main(save_samples_pth: str):
     batches = data_stream(seed, X_train, batch_size, n)
 
     # Create AEVB inference engine
-    gen_model = GenModel(random.key(0), latent_dim=4)
-    rec_model = RecModel(random.key(1), latent_dim=4)
+    decoder = Decoder(random.key(0), latent_dim=4)
+    encoder = Encoder(random.key(1), latent_dim=4)
     latent_dim = 4
     data_dim = 784
     optimizer = optax.adam(1e-3)
 
-    gen_init, gen_apply = init_apply_eqx_model(gen_model, batchnorm=True, input_dim=latent_dim)
-    rec_init, rec_apply = init_apply_eqx_model(rec_model, batchnorm=True, input_dim=data_dim)
+    dec_init, dec_apply = init_apply_eqx_model(decoder, batchnorm=True, input_dim=latent_dim)
+    enc_init, enc_apply = init_apply_eqx_model(encoder, batchnorm=True, input_dim=data_dim)
 
     engine: AevbEngine = Aevb(
         latent_dim=latent_dim,
         data_dim=data_dim,
-        gen_prior="unit_normal",
-        gen_obs_dist="normal",
-        gen_apply=gen_apply,
-        gen_init=gen_init,
-        rec_dist="normal",
-        rec_apply=rec_apply,
-        rec_init=rec_init,
+        enc_apply=enc_apply,
+        enc_init=enc_init,
+        dec_apply=dec_apply,
+        dec_init=dec_init,
+        prior="unit_normal",
+        obs_dist="normal",
+        variational_dist="normal",
         optimizer=optimizer,
         n_samples=5,
     )
@@ -149,7 +149,7 @@ def main(save_samples_pth: str):
     num_steps = 3000
     eval_every = 100
 
-    aevb_state: AevbState = engine.init(gen_init_args=(), rec_init_args=())
+    aevb_state: AevbState = engine.init(dec_init_args=(), enc_init_args=())
 
     key, *training_keys = random.split(key, num_steps + 1)
     for i, rng_key in enumerate(training_keys):

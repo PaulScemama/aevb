@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any, Callable, Iterable, Mapping, NamedTuple
+from typing import Callable, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -24,39 +22,39 @@ builtin_dists = {
 }
 
 
-class GenPrior(NamedTuple):
+class Prior(NamedTuple):
     logpdf: Callable
     name: str = None
 
 
-class GenObsDist(NamedTuple):
+class ObsDist(NamedTuple):
     logpdf: Callable
 
 
-class RecDist(NamedTuple):
+class VariationalDist(NamedTuple):
     logpdf: Callable
     reparam_sample: Callable
     name: str = None
 
 
 class AevbGenModel(NamedTuple):
-    prior: GenPrior
-    obs_dist: GenObsDist
+    prior: Prior
+    obs_dist: ObsDist
     apply: callable
     init: callable = None
 
 
 class AevbRecModel(NamedTuple):
-    dist: RecDist
+    variational_dist: VariationalDist
     apply: callable
     init: callable = None
 
 
 class AevbState(NamedTuple):
-    rec_params: ArrayLikeTree
-    rec_state: ArrayLikeTree
-    gen_params: ArrayLikeTree
-    gen_state: ArrayLikeTree
+    enc_params: ArrayLikeTree
+    enc_state: ArrayLikeTree
+    dec_params: ArrayLikeTree
+    dec_state: ArrayLikeTree
     opt_state: OptState
 
 
@@ -96,40 +94,40 @@ def _approx_kl(z, prior_logpdf, variational_logpdf, **z_params):
 
 def _encode_and_sample(
     key: random.key,
-    rec_params: ArrayLikeTree,
-    rec_state: ArrayLikeTree,
+    enc_params: ArrayLikeTree,
+    enc_state: ArrayLikeTree,
     x: ArrayLike,
-    rec_apply: Callable,
-    rec_sample: Callable,
+    enc_apply: Callable,
+    variational_sample: Callable,
     n_samples: int,
 ):
-    z_params, upd_rec_state = rec_apply(rec_params, rec_state, x, train=True)
-    z = rec_sample(key, **z_params, n_samples=n_samples)
-    return z, z_params, upd_rec_state
+    z_params, upd_enc_state = enc_apply(enc_params, enc_state, x, train=True)
+    z = variational_sample(key, **z_params, n_samples=n_samples)
+    return z, z_params, upd_enc_state
 
 
 def _decode(
-    gen_params: ArrayLikeTree,
-    gen_state: ArrayLikeTree,
-    gen_apply: Callable,
+    dec_params: ArrayLikeTree,
+    dec_state: ArrayLikeTree,
+    dec_apply: Callable,
     z: ArrayLike,
 ):
-    x_params, upd_gen_state = gen_apply(gen_params, gen_state, z, train=True)
+    x_params, upd_gen_state = dec_apply(dec_params, dec_state, z, train=True)
     return x_params, upd_gen_state
 
 
 def _step(
     rng_key: random.key,
-    rec_params: ArrayLikeTree,
-    rec_state: ArrayLikeTree,
-    gen_params: ArrayLikeTree,
-    gen_state: ArrayLikeTree,
+    enc_params: ArrayLikeTree,
+    enc_state: ArrayLikeTree,
+    dec_params: ArrayLikeTree,
+    dec_state: ArrayLikeTree,
     opt_state: ArrayLikeTree,
     x: ArrayLike,
-    rec_apply: Callable,
-    rec_sample: Callable,
-    gen_apply: Callable,
-    gen_logpdf: Callable,
+    enc_apply: Callable,
+    dec_apply: Callable,
+    variational_sample: Callable,
+    obs_logpdf: Callable,
     kl_fn: Callable,
     optimizer: GradientTransformation,
     n_samples: int,
@@ -138,15 +136,15 @@ def _step(
 ]:
     
     def loss_fn(
-        rec_params: ArrayLikeTree, gen_params: ArrayLikeTree
+        enc_params: ArrayLikeTree, dec_params: ArrayLikeTree
     ) -> tuple[float, tuple[float, float]]:
 
         # ----- Encode and Decode ----
         # z: [n_samples, batch, latent_dim]
-        z, z_params, upd_rec_state = _encode_and_sample(rng_key, rec_params, rec_state, x, rec_apply, rec_sample, n_samples)
+        z, z_params, upd_enc_state = _encode_and_sample(rng_key, enc_params, enc_state, x, enc_apply, variational_sample, n_samples)
 
         # Each x_param is [n_samples, batch_size, ...]
-        x_params, upd_gen_state = _decode(gen_params, gen_state, gen_apply, z)
+        x_params, upd_dec_state = _decode(dec_params, dec_state, dec_apply, z)
 
         # ----- Compute losses -----
         # KL loss
@@ -155,36 +153,36 @@ def _step(
         # x is [batch_size, data_dim]
         # Each x_param is [n_samples, batch_size, ...]
         # Broadcasting will take care of the leading dimension mismatch.
-        nll = -gen_logpdf(x, **x_params) / n_samples
+        nll = -obs_logpdf(x, **x_params) / n_samples
 
         # ----- Combine losses -----
         loss = nll + kl
-        return loss, ((nll, kl), (upd_rec_state, upd_gen_state))
+        return loss, ((nll, kl), (upd_enc_state, upd_dec_state))
 
     loss_grad_fn = jax.value_and_grad(loss_fn, has_aux=True, argnums=(0, 1))
-    (loss_val, ((nll, kl), (rec_state_, gen_state_))), (rec_grad, gen_grad) = (
-        loss_grad_fn(rec_params, gen_params)
+    (loss_val, ((nll, kl), (enc_state_, dec_state_))), (enc_grad, dec_grad) = (
+        loss_grad_fn(enc_params, dec_params)
     )
 
-    (rec_updates, gen_updates), opt_state_ = optimizer.update(
-        (rec_grad, gen_grad),
+    (enc_updates, dec_updates), opt_state_ = optimizer.update(
+        (enc_grad, dec_grad),
         opt_state,
-        (rec_params, gen_params),
+        (enc_params, dec_params),
     )
-    rec_params_ = optax.apply_updates(rec_params, rec_updates)
-    gen_params_ = optax.apply_updates(gen_params, gen_updates)
+    enc_params_ = optax.apply_updates(enc_params, enc_updates)
+    dec_params_ = optax.apply_updates(dec_params, dec_updates)
     return (
-        (rec_params_, rec_state_),
-        (gen_params_, gen_state_),
+        (enc_params_, enc_state_),
+        (dec_params_, dec_state_),
         opt_state_,
     ), (loss_val, nll, kl)
 
 
 def make_step(
-    gen_apply: Callable,
-    gen_logpdf: Callable,
-    rec_apply: Callable,
-    rec_sample: Callable,
+    enc_apply: Callable,
+    dec_apply: Callable,
+    obs_logpdf: Callable,
+    variational_sample: Callable,
     kl_fn: Callable,
     optimizer: GradientTransformation,
     n_samples: int,
@@ -199,33 +197,33 @@ def make_step(
 
     def step(rng_key, aevb_state, x) -> tuple[AevbState, AevbInfo]:
         (
-            (rec_params, rec_state),
-            (gen_params, gen_state),
+            (enc_params, enc_state),
+            (dec_params, dec_state),
             opt_state,
         ), (loss_val, nll, kl) = _step(
             rng_key,
-            aevb_state.rec_params,
-            aevb_state.rec_state,
-            aevb_state.gen_params,
-            aevb_state.gen_state,
+            aevb_state.enc_params,
+            aevb_state.enc_state,
+            aevb_state.dec_params,
+            aevb_state.dec_state,
             aevb_state.opt_state,
             x,
-            rec_apply,
-            rec_sample,
-            gen_apply,
-            gen_logpdf,
+            enc_apply,
+            dec_apply,
+            variational_sample,
+            obs_logpdf,
             _kl_fn,
             optimizer,
             n_samples,
         )
         return AevbState(
-            rec_params, rec_state, gen_params, gen_state, opt_state
+            enc_params, enc_state, dec_params, dec_state, opt_state
         ), AevbInfo(loss_val, nll, kl)
 
     return step
 
 
-def _convert_gen_prior(dist: str | Callable) -> GenPrior:
+def _convert_prior(dist: str | Callable) -> Prior:
     if isinstance(dist, str):
         name = dist
         dist = builtin_priors[dist]
@@ -235,12 +233,12 @@ def _convert_gen_prior(dist: str | Callable) -> GenPrior:
         logpdf = dist
     else:
         raise ValueError  # TODO: fill in
-    return GenPrior(logpdf, name)
+    return Prior(logpdf, name)
 
 
-def _convert_gen_obs_dist(
+def _convert_obs_dist(
     dist: str | Callable 
-) -> GenObsDist:
+) -> ObsDist:
     if isinstance(dist, str):
         dist = builtin_dists[dist]
         logpdf = dist.logpdf
@@ -248,10 +246,10 @@ def _convert_gen_obs_dist(
         logpdf = dist
     else:
         raise ValueError  # TODO: fill in
-    return GenObsDist(logpdf)
+    return ObsDist(logpdf)
 
 
-def _convert_rec_dist(dist: str | tuple[Callable, Callable]) -> RecDist:
+def _convert_variational_dist(dist: str | tuple[Callable, Callable]) -> VariationalDist:
     if isinstance(dist, str):
         dist_name = dist
         dist = builtin_dists[dist]
@@ -261,10 +259,10 @@ def _convert_rec_dist(dist: str | tuple[Callable, Callable]) -> RecDist:
         logpdf, reparam_sample = dist
     else:
         raise ValueError  # TODO: fill in
-    return RecDist(logpdf, reparam_sample, dist_name)
+    return VariationalDist(logpdf, reparam_sample, dist_name)
 
 
-def _create_kl_fn(prior: GenPrior, dist: RecDist) -> Callable:
+def _create_kl_fn(prior: Prior, dist: VariationalDist) -> Callable:
     if prior.name == "unit_normal" and dist.name == "normal":
         return _unit_normal_kl
     else:
@@ -273,9 +271,9 @@ def _create_kl_fn(prior: GenPrior, dist: RecDist) -> Callable:
 
 class Aevb:
 
-    convert_gen_prior = staticmethod(_convert_gen_prior)
-    convert_gen_obs_dist = staticmethod(_convert_gen_obs_dist)
-    convert_rec_dist = staticmethod(_convert_rec_dist)
+    convert_prior = staticmethod(_convert_prior)
+    convert_obs_dist = staticmethod(_convert_obs_dist)
+    convert_variational_dist = staticmethod(_convert_variational_dist)
     create_kl_fn = staticmethod(_create_kl_fn)
     make_step = staticmethod(make_step)
 
@@ -283,43 +281,43 @@ class Aevb:
         cls,
         latent_dim: int,
         data_dim: int,
-        gen_prior: str | Callable,
-        gen_obs_dist: str | Callable,
-        gen_apply: Callable,
-        gen_init: Callable,
-        rec_dist: str | tuple[Callable, Callable],
-        rec_apply: Callable,
-        rec_init: Callable,
+        enc_apply: Callable,
+        enc_init: Callable,
+        dec_apply: Callable,
+        dec_init: Callable,
+        prior: str | Callable,
+        obs_dist: str | Callable,
+        variational_dist: str | tuple[Callable, Callable],
         optimizer: GradientTransformation,
         n_samples: int,
     ):
-        gen_prior: GenPrior = cls.convert_gen_prior(gen_prior)
-        gen_obs_dist: GenObsDist = cls.convert_gen_obs_dist(gen_obs_dist)
-        rec_dist: RecDist = cls.convert_rec_dist(rec_dist)
-        kl_fn: Callable = cls.create_kl_fn(gen_prior, rec_dist)
-        print(kl_fn)
+        prior: Prior = cls.convert_prior(prior)
+        obs_dist: ObsDist = cls.convert_obs_dist(obs_dist)
+        variational_dist: VariationalDist = cls.convert_variational_dist(variational_dist)
+        kl_fn: Callable = cls.create_kl_fn(prior, variational_dist)
 
         gen_model: AevbGenModel = AevbGenModel(
-            prior=gen_prior,
-            obs_dist=gen_obs_dist,
-            apply=gen_apply,
-            init=gen_init,
-        )
-        rec_model: AevbRecModel = AevbRecModel(
-            dist=rec_dist, init=rec_init, apply=rec_apply
+            prior=prior,
+            obs_dist=obs_dist,
+            apply=dec_apply,
+            init=dec_init,
         )
 
-        def aevb_init(gen_init_args, rec_init_args) -> AevbState:
-            gen_params, gen_state = gen_init(*gen_init_args)
-            rec_params, rec_state = rec_init(*rec_init_args)
-            opt_state = optimizer.init((rec_params, gen_params))
-            return AevbState(rec_params, rec_state, gen_params, gen_state, opt_state)
+        rec_model: AevbRecModel = AevbRecModel(
+            variational_dist=variational_dist, init=enc_init, apply=enc_apply
+        )
+
+        def aevb_init(enc_init_args, dec_init_args) -> AevbState:
+            enc_params, enc_state = enc_init(*enc_init_args)
+            dec_params, dec_state = dec_init(*dec_init_args)
+            opt_state = optimizer.init((enc_params, dec_params))
+            return AevbState(enc_params, enc_state, dec_params, dec_state, opt_state)
 
         aevb_step = cls.make_step(
-            gen_apply,
-            gen_obs_dist.logpdf,
-            rec_apply,
-            rec_dist.reparam_sample,
+            enc_apply,
+            dec_apply,
+            obs_dist.logpdf,
+            variational_dist.reparam_sample,
             kl_fn,
             optimizer,
             n_samples,

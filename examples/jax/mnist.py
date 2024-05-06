@@ -38,7 +38,7 @@ def data_stream(seed, data, batch_size, data_size):
 
 
 # Generative Model and Recognition Feature Extractor --------------------
-def recognition_init(key, latent_dim, data_dim):
+def encoder_init(key, latent_dim, data_dim):
     w1key, b1key, w2key, b2key, w3key, b3key = random.split(key, 6)
 
     shared_W = random.normal(w1key, (data_dim, 100)) * 0.1
@@ -59,7 +59,7 @@ def recognition_init(key, latent_dim, data_dim):
     ), {}
 
 
-def recognition_apply(params, state, input, train):
+def encoder_apply(params, state, input, train):
     x = jnp.dot(input, params["shared"]["W"]) + params["shared"]["b"]
     x = jax.nn.relu(x)
     mu = jnp.dot(x, params["mu"]["W"]) + params["mu"]["b"]
@@ -68,14 +68,14 @@ def recognition_apply(params, state, input, train):
     return {"loc": mu, "scale": sigma}, {}
 
 
-def generative_init(key, latent_dim, data_dim):
+def decoder_init(key, latent_dim, data_dim):
     wkey, bkey = random.split(key)
     W = random.normal(wkey, (latent_dim, data_dim)) * 0.1
     b = random.normal(bkey, (data_dim,)) * 0.1
     return {"w": W, "b": b}, {}
 
 
-def generative_apply(params, state, input, train: bool):
+def decoder_apply(params, state, input, train: bool):
     W, b = params["w"], params["b"]
     pre = jnp.dot(input, W) + b
     out = jax.nn.relu(pre)
@@ -103,15 +103,15 @@ def main(save_samples_pth: str):
     engine: AevbEngine = Aevb(
         latent_dim=latent_dim,
         data_dim=data_dim,
-        gen_prior="unit_normal",
-        gen_obs_dist="normal",
-        gen_apply=generative_apply,
-        gen_init=generative_init,
-        rec_dist="normal",
-        rec_apply=recognition_apply,
-        rec_init=recognition_init,
+        enc_apply=encoder_apply,
+        enc_init=encoder_init,
+        dec_apply=decoder_apply,
+        dec_init=decoder_init,
+        prior="unit_normal",
+        obs_dist="normal",
+        variational_dist="normal",
         optimizer=optimizer,
-        n_samples=1,
+        n_samples=5,
     )
 
     # Run AEVB
@@ -121,8 +121,8 @@ def main(save_samples_pth: str):
 
     key, subkey1, subkey2 = random.split(key, 3)
     aevb_state = engine.init(
-        gen_init_args=(subkey1, latent_dim, data_dim),
-        rec_init_args=(subkey2, latent_dim, data_dim),
+        dec_init_args=(subkey1, latent_dim, data_dim),
+        enc_init_args=(subkey2, latent_dim, data_dim),
     )
 
     key, *training_keys = random.split(key, num_steps + 1)
