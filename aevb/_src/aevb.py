@@ -40,14 +40,14 @@ class VariationalDist(NamedTuple):
 class AevbGenModel(NamedTuple):
     prior: Prior
     obs_dist: ObsDist
-    apply: callable
-    init: callable 
+    dec_apply: callable
+    dec_init: callable 
 
 
 class AevbRecModel(NamedTuple):
     variational_dist: VariationalDist
-    apply: callable
-    init: callable
+    enc_apply: callable
+    enc_init: callable
 
 
 class AevbState(NamedTuple):
