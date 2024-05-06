@@ -41,13 +41,13 @@ class AevbGenModel(NamedTuple):
     prior: Prior
     obs_dist: ObsDist
     apply: callable
-    init: callable = None
+    init: callable 
 
 
 class AevbRecModel(NamedTuple):
     variational_dist: VariationalDist
     apply: callable
-    init: callable = None
+    init: callable
 
 
 class AevbState(NamedTuple):
