@@ -10,7 +10,7 @@ from optax import GradientTransformation, OptState
 from functools import partial
 
 from aevb._src import dist
-from aevb._src.types import ArrayLike, ArrayLikeTree
+from aevb._src.types import ArrayLike, ArrayTree, ArrayLikeTree
 
 
 builtin_priors = {"unit_normal": dist.set_params(dist.normal, loc=0, scale=1)}
@@ -70,7 +70,7 @@ class AevbEngine(NamedTuple):
     gen_model: AevbGenModel
     rec_model: AevbRecModel
 
-    init: Callable  
+    init: Callable[..., tuple[ArrayTree, ArrayTree]]
     step: Callable[[random.key, AevbState, ArrayLike], tuple[AevbState, AevbInfo]]
 
 
