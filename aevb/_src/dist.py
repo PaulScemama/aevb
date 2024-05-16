@@ -74,13 +74,6 @@ rsample_loc_scale_samplers = {
 }
 
 
-class Dist(NamedTuple):
-    name: str
-    logpdf: callable
-    sample: callable
-    rsample: callable
-
-
 def construct_loc_scale_functions(name: str, loc, scale):
     out = ()
     fns = (
@@ -97,6 +90,13 @@ def construct_loc_scale_functions(name: str, loc, scale):
             fn = fn
         out += (fn,)
     return Dist(name, *out)
+
+
+class Dist(NamedTuple):
+    name: str
+    logpdf: callable
+    sample: callable
+    rsample: callable
 
 
 def Normal(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = None):
