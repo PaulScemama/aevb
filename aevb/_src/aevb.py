@@ -1,4 +1,3 @@
-import inspect
 from functools import partial
 from typing import Callable, NamedTuple
 
@@ -10,6 +9,7 @@ from jax.tree_util import tree_leaves
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
 
+from aevb._src.checks import check_coder_output_keys
 from aevb._src.dist import Laplace, Logistic, Normal, T
 from aevb._src.types import ArrayLike, ArrayLikeTree, ArrayTree
 
@@ -273,29 +273,6 @@ def _create_kl_fn(prior: Prior, dist: VariationalDist) -> Callable:
         )
 
 
-def _check_coder_output_keys(
-    params, state, apply_fn, input, dist_fns, coder_name: str, dist_name: str
-):
-    for dist_fn in dist_fns:
-        dist_argnames = inspect.signature(dist_fn).parameters.keys()
-        out, _ = apply_fn(params, state, input, train=False)
-        for key in out.keys():
-            assert (
-                key in dist_argnames
-            ), f"""
-            The `{coder_name}` must output a dictionary with keys that
-            match the parameter names of the distribution `{dist_name}`.
-
-            Instead got '{key}' in out.keys(): {out.keys()} whic is not 
-            in `{dist_name}` argnames: {dist_argnames}...
-
-            For reference
-            -------------
-                `{coder_name}`: {apply_fn}
-                `{dist_name}` function: {dist_fn}
-        """
-
-
 class Aevb:
 
     convert_prior = staticmethod(_convert_prior)
@@ -342,7 +319,7 @@ class Aevb:
         def aevb_init(enc_init_args, dec_init_args) -> AevbState:
 
             enc_params, enc_state = enc_init(*enc_init_args)
-            _check_coder_output_keys(
+            check_coder_output_keys(
                 params=enc_params,
                 state=enc_state,
                 apply_fn=enc_apply,
@@ -353,7 +330,7 @@ class Aevb:
             )
 
             dec_params, dec_state = dec_init(*dec_init_args)
-            _check_coder_output_keys(
+            check_coder_output_keys(
                 params=dec_params,
                 state=dec_state,
                 apply_fn=dec_apply,
