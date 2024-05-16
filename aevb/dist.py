@@ -1,1 +1,1 @@
-from aevb._src.dist import Normal, Laplace, Logistic, T
+from aevb._src.dist import Laplace, Logistic, Normal, T

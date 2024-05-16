@@ -1,11 +1,12 @@
-from typing import NamedTuple
 from functools import partial
+from typing import NamedTuple
+
 import jax
 import jax.random as random
 import jax.scipy.stats as stats
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 
-from aevb._src.types import ArrayLikeTree, ArrayTree, ArrayLike
+from aevb._src.types import ArrayLike, ArrayLikeTree, ArrayTree
 
 __all__ = ["Normal", "Laplace", "Logistic", "T"]
 
@@ -20,16 +21,19 @@ def dist_like(dist_fn: callable) -> ArrayTree:
         samples = jax.tree_map(
             lambda p, k: dist_fn(k, shape=(n_samples,) + p.shape),
             tree,
-            tree_unflatten(treedef, all_keys),  
+            tree_unflatten(treedef, all_keys),
         )
         return samples
 
     return _dist_like
 
+
 def nonstandardize_loc_scale_sample(standard_sampler: callable):
     def _sample(key, loc, scale, shape=()):
         return scale * standard_sampler(key, shape=shape) + loc
+
     return _sample
+
 
 def loc_scale_rsample(like_sampler: callable):
 
@@ -70,7 +74,6 @@ rsample_loc_scale_samplers = {
 }
 
 
-
 class Dist(NamedTuple):
     name: str
     logpdf: callable
@@ -78,10 +81,13 @@ class Dist(NamedTuple):
     rsample: callable
 
 
-
 def construct_loc_scale_functions(name: str, loc, scale):
     out = ()
-    fns = (loc_scale_logpdfs[name], loc_scale_samplers[name], rsample_loc_scale_samplers[name])
+    fns = (
+        loc_scale_logpdfs[name],
+        loc_scale_samplers[name],
+        rsample_loc_scale_samplers[name],
+    )
     for fn in fns:
         if loc:
             fn = partial(fn, loc=loc)
@@ -91,7 +97,6 @@ def construct_loc_scale_functions(name: str, loc, scale):
             fn = fn
         out += (fn,)
     return Dist(name, *out)
-
 
 
 def Normal(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = None):
@@ -108,5 +113,3 @@ def Logistic(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = N
 
 def T(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = None):
     return construct_loc_scale_functions("t", loc, scale)
-
-

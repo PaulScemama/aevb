@@ -1,6 +1,7 @@
+import inspect
 from functools import partial
 from typing import Callable, NamedTuple
-import inspect
+
 import jax
 import jax.numpy as jnp
 import jax.random as random
@@ -9,7 +10,7 @@ from jax.tree_util import tree_leaves
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
 
-from aevb._src.dist import Normal, Laplace, Logistic, T
+from aevb._src.dist import Laplace, Logistic, Normal, T
 from aevb._src.types import ArrayLike, ArrayLikeTree, ArrayTree
 
 builtin_priors = {"unit_normal": Normal(0, 1)}
@@ -272,7 +273,6 @@ def _create_kl_fn(prior: Prior, dist: VariationalDist) -> Callable:
         )
 
 
-
 def _check_coder_output_keys(
     params, state, apply_fn, input, dist_fns, coder_name: str, dist_name: str
 ):
@@ -280,7 +280,9 @@ def _check_coder_output_keys(
         dist_argnames = inspect.signature(dist_fn).parameters.keys()
         out, _ = apply_fn(params, state, input, train=False)
         for key in out.keys():
-            assert key in dist_argnames, f"""
+            assert (
+                key in dist_argnames
+            ), f"""
             The `{coder_name}` must output a dictionary with keys that
             match the parameter names of the distribution `{dist_name}`.
 
@@ -321,7 +323,7 @@ class Aevb:
         variational_dist: VariationalDist = cls.convert_variational_dist(
             variational_dist
         )
-        
+
         kl_fn: Callable = cls.create_kl_fn(prior, variational_dist)
 
         gen_model: AevbGenModel = AevbGenModel(
@@ -338,13 +340,13 @@ class Aevb:
         )
 
         def aevb_init(enc_init_args, dec_init_args) -> AevbState:
-            
+
             enc_params, enc_state = enc_init(*enc_init_args)
             _check_coder_output_keys(
                 params=enc_params,
                 state=enc_state,
                 apply_fn=enc_apply,
-                input=jnp.ones((1,data_dim)),
+                input=jnp.ones((1, data_dim)),
                 dist_fns=(variational_dist.logpdf, variational_dist.rsample),
                 coder_name="enc_apply",
                 dist_name="variational_dist",
@@ -355,7 +357,7 @@ class Aevb:
                 params=dec_params,
                 state=dec_state,
                 apply_fn=dec_apply,
-                input=jnp.ones((1,latent_dim)),
+                input=jnp.ones((1, latent_dim)),
                 dist_fns=(obs_dist.logpdf,),
                 coder_name="dec_apply",
                 dist_name="obs_dist",
