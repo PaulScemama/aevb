@@ -31,10 +31,9 @@ def nonstandardize_loc_scale_sample(standard_sampler: callable):
         return scale * standard_sampler(key, shape=shape) + loc
     return _sample
 
-# For loc/scale families, sample and reparam sample are the same.
-def loc_scale_sample(like_sampler: callable):
+def loc_scale_rsample(like_sampler: callable):
 
-    def _loc_scale_sample(
+    def _loc_scale_rsample(
         rng_key: random.key, loc: ArrayLikeTree, scale: ArrayLikeTree, n_samples: int
     ) -> ArrayTree:
         samples = like_sampler(rng_key, loc, n_samples)
@@ -46,7 +45,7 @@ def loc_scale_sample(like_sampler: callable):
         )
         return samples
 
-    return _loc_scale_sample
+    return _loc_scale_rsample
 
 
 loc_scale_logpdfs = {
@@ -64,10 +63,10 @@ loc_scale_samplers = {
 }
 
 rsample_loc_scale_samplers = {
-    "normal": loc_scale_sample(dist_like(random.normal)),
-    "laplace": loc_scale_sample(dist_like(random.laplace)),
-    "logistic": loc_scale_sample(dist_like(random.logistic)),
-    "t": loc_scale_sample(dist_like(random.t)),
+    "normal": loc_scale_rsample(dist_like(random.normal)),
+    "laplace": loc_scale_rsample(dist_like(random.laplace)),
+    "logistic": loc_scale_rsample(dist_like(random.logistic)),
+    "t": loc_scale_rsample(dist_like(random.t)),
 }
 
 
