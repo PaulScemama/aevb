@@ -1,6 +1,6 @@
 from functools import partial
 from typing import Callable, NamedTuple
-
+import inspect
 import jax
 import jax.numpy as jnp
 import jax.random as random
@@ -9,15 +9,16 @@ from jax.tree_util import tree_leaves
 from jax.typing import ArrayLike
 from optax import GradientTransformation, OptState
 
-from aevb._src import dist
+from aevb._src.dist import Normal, Laplace, Logistic, T
 from aevb._src.types import ArrayLike, ArrayLikeTree, ArrayTree
 
-builtin_priors = {"unit_normal": dist.set_params(dist.normal, loc=0, scale=1)}
+builtin_priors = {"unit_normal": Normal(0, 1)}
 
 builtin_dists = {
-    "normal": dist.normal,
-    "laplace": dist.laplace,
-    "student_t": dist.student_t,
+    "normal": Normal(),
+    "laplace": Laplace(),
+    "logistic": Logistic(),
+    "t": T(),
 }
 
 
@@ -32,7 +33,7 @@ class ObsDist(NamedTuple):
 
 class VariationalDist(NamedTuple):
     logpdf: Callable
-    reparam_sample: Callable
+    rsample: Callable
     name: str = None
 
 
@@ -149,11 +150,13 @@ def _step(
         # ----- Compute losses -----
         # KL loss
         kl = kl_fn(z, **z_params)
+        kl = kl.sum()
 
         # x is [batch_size, data_dim]
         # Each x_param is [n_samples, batch_size, ...]
         # Broadcasting will take care of the leading dimension mismatch.
         nll = -obs_logpdf(x, **x_params) / n_samples
+        nll = nll.sum()
 
         # ----- Combine losses -----
         loss = nll + kl
@@ -251,13 +254,13 @@ def _convert_variational_dist(dist: str | tuple[Callable, Callable]) -> Variatio
     if isinstance(dist, str):
         dist_name = dist
         dist = builtin_dists[dist]
-        logpdf, reparam_sample = dist.logpdf, dist.reparam_sample
+        logpdf, rsample = dist.logpdf, dist.rsample
     elif isinstance(dist, tuple):
         dist_name = None
-        logpdf, reparam_sample = dist
+        logpdf, rsample = dist
     else:
         raise ValueError  # TODO: fill in
-    return VariationalDist(logpdf, reparam_sample, dist_name)
+    return VariationalDist(logpdf, rsample, dist_name)
 
 
 def _create_kl_fn(prior: Prior, dist: VariationalDist) -> Callable:
@@ -267,6 +270,28 @@ def _create_kl_fn(prior: Prior, dist: VariationalDist) -> Callable:
         return partial(
             _approx_kl, prior_logpdf=prior.logpdf, variational_logpdf=dist.logpdf
         )
+
+
+
+def _check_coder_output_keys(
+    params, state, apply_fn, input, dist_fns, coder_name: str, dist_name: str
+):
+    for dist_fn in dist_fns:
+        dist_argnames = inspect.signature(dist_fn).parameters.keys()
+        out, _ = apply_fn(params, state, input, train=False)
+        for key in out.keys():
+            assert key in dist_argnames, f"""
+            The `{coder_name}` must output a dictionary with keys that
+            match the parameter names of the distribution `{dist_name}`.
+
+            Instead got '{key}' in out.keys(): {out.keys()} whic is not 
+            in `{dist_name}` argnames: {dist_argnames}...
+
+            For reference
+            -------------
+                `{coder_name}`: {apply_fn}
+                `{dist_name}` function: {dist_fn}
+        """
 
 
 class Aevb:
@@ -296,22 +321,46 @@ class Aevb:
         variational_dist: VariationalDist = cls.convert_variational_dist(
             variational_dist
         )
+        
         kl_fn: Callable = cls.create_kl_fn(prior, variational_dist)
 
         gen_model: AevbGenModel = AevbGenModel(
             prior=prior,
             obs_dist=obs_dist,
-            apply=dec_apply,
-            init=dec_init,
+            dec_apply=dec_apply,
+            dec_init=dec_init,
         )
 
         rec_model: AevbRecModel = AevbRecModel(
-            variational_dist=variational_dist, init=enc_init, apply=enc_apply
+            variational_dist=variational_dist,
+            enc_apply=enc_apply,
+            enc_init=enc_init,
         )
 
         def aevb_init(enc_init_args, dec_init_args) -> AevbState:
+            
             enc_params, enc_state = enc_init(*enc_init_args)
+            _check_coder_output_keys(
+                params=enc_params,
+                state=enc_state,
+                apply_fn=enc_apply,
+                input=jnp.ones((1,data_dim)),
+                dist_fns=(variational_dist.logpdf, variational_dist.rsample),
+                coder_name="enc_apply",
+                dist_name="variational_dist",
+            )
+
             dec_params, dec_state = dec_init(*dec_init_args)
+            _check_coder_output_keys(
+                params=dec_params,
+                state=dec_state,
+                apply_fn=dec_apply,
+                input=jnp.ones((1,latent_dim)),
+                dist_fns=(obs_dist.logpdf,),
+                coder_name="dec_apply",
+                dist_name="obs_dist",
+            )
+
             opt_state = optimizer.init((enc_params, dec_params))
             return AevbState(enc_params, enc_state, dec_params, dec_state, opt_state)
 
@@ -319,7 +368,7 @@ class Aevb:
             enc_apply,
             dec_apply,
             obs_dist.logpdf,
-            variational_dist.reparam_sample,
+            variational_dist.rsample,
             kl_fn,
             optimizer,
             n_samples,

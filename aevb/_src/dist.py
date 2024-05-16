@@ -1,26 +1,13 @@
-import functools
-
+from typing import NamedTuple
+from functools import partial
 import jax
 import jax.random as random
 import jax.scipy.stats as stats
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
 
-from aevb._src.types import ArrayLikeTree, ArrayTree
+from aevb._src.types import ArrayLikeTree, ArrayTree, ArrayLike
 
-
-def method_list(cls):
-    return [
-        func
-        for func in dir(cls)
-        if callable(getattr(cls, func)) and not func.startswith("__")
-    ]
-
-
-def set_params(cls, **kwargs):
-    for method in method_list(cls):
-        new_method = functools.partial(getattr(cls, method), **kwargs)
-        setattr(cls, method, new_method)
-    return cls
+__all__ = ["Normal", "Laplace", "Logistic", "T"]
 
 
 def dist_like(dist_fn: callable) -> ArrayTree:
@@ -33,27 +20,24 @@ def dist_like(dist_fn: callable) -> ArrayTree:
         samples = jax.tree_map(
             lambda p, k: dist_fn(k, shape=(n_samples,) + p.shape),
             tree,
-            tree_unflatten(treedef, all_keys),
+            tree_unflatten(treedef, all_keys),  
         )
         return samples
 
     return _dist_like
 
+def nonstandardize_loc_scale_sample(standard_sampler: callable):
+    def _sample(key, loc, scale, shape=()):
+        return scale * standard_sampler(key, shape=shape) + loc
+    return _sample
 
-standard_samplers = {
-    "normal": dist_like(random.normal),
-    "laplace": dist_like(random.laplace),
-    "student_t": dist_like(random.t),
-    "logistic": dist_like(random.logistic),
-}
+# For loc/scale families, sample and reparam sample are the same.
+def loc_scale_sample(like_sampler: callable):
 
-
-def loc_scale_reparam_sample(standard_sampler: callable):
-
-    def _loc_scale_reparam_sample(
+    def _loc_scale_sample(
         rng_key: random.key, loc: ArrayLikeTree, scale: ArrayLikeTree, n_samples: int
     ) -> ArrayTree:
-        samples = standard_sampler(rng_key, loc, n_samples)
+        samples = like_sampler(rng_key, loc, n_samples)
         samples = jax.tree_map(
             lambda l, s, n: l + s * n,
             loc,
@@ -62,77 +46,68 @@ def loc_scale_reparam_sample(standard_sampler: callable):
         )
         return samples
 
-    return _loc_scale_reparam_sample
+    return _loc_scale_sample
 
 
-def tractable_inverse_cdf_sample(): ...
+loc_scale_logpdfs = {
+    "normal": stats.norm.logpdf,
+    "laplace": stats.laplace.logpdf,
+    "logistic": stats.logistic.logpdf,
+    "t": stats.t.logpdf,
+}
+
+loc_scale_samplers = {
+    "normal": nonstandardize_loc_scale_sample(random.normal),
+    "laplace": nonstandardize_loc_scale_sample(random.laplace),
+    "logistic": nonstandardize_loc_scale_sample(random.logistic),
+    "t": nonstandardize_loc_scale_sample(random.t),
+}
+
+rsample_loc_scale_samplers = {
+    "normal": loc_scale_sample(dist_like(random.normal)),
+    "laplace": loc_scale_sample(dist_like(random.laplace)),
+    "logistic": loc_scale_sample(dist_like(random.logistic)),
+    "t": loc_scale_sample(dist_like(random.t)),
+}
 
 
-def composition_sample(): ...
+
+class Dist(NamedTuple):
+    name: str
+    logpdf: callable
+    sample: callable
+    rsample: callable
 
 
-def loc_scale(cls, name):
-    cls.param_names = ("loc", "scale")
-    standard_sampler = standard_samplers[name]
-    reparam_fn = loc_scale_reparam_sample(standard_sampler)
-    cls.reparam_sample = reparam_fn
-    return cls
+
+def construct_loc_scale_functions(name: str, loc, scale):
+    out = ()
+    fns = (loc_scale_logpdfs[name], loc_scale_samplers[name], rsample_loc_scale_samplers[name])
+    for fn in fns:
+        if loc:
+            fn = partial(fn, loc=loc)
+        if scale:
+            fn = partial(fn, scale=scale)
+        else:
+            fn = fn
+        out += (fn,)
+    return Dist(name, *out)
 
 
-def tractable_inverse_cdf(cls):
-    """Class decorator adding `tractable_inverse_sample` as a method."""
-    cls.reparam_sample = tractable_inverse_cdf_sample
-    return cls
+
+def Normal(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = None):
+    return construct_loc_scale_functions("normal", loc, scale)
 
 
-def composition(cls):
-    """Class decorator adding `composition_sample` as a method."""
-    cls.reparam_sample = composition_sample
-    return cls
+def Laplace(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = None):
+    return construct_loc_scale_functions("laplace", loc, scale)
 
 
-class normal:
-
-    def logpdf(x, loc, scale):
-        return stats.norm.logpdf(x, loc, scale).sum()
-
-    def sample(key, loc, scale, shape=()):
-        return scale * jax.random.normal(key, shape=shape) + loc
-
-    def reparam_sample(key, loc, scale, n_samples):
-        return loc_scale_reparam_sample(standard_samplers["normal"])(
-            key, loc, scale, n_samples
-        )
+def Logistic(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = None):
+    return construct_loc_scale_functions("logistic", loc, scale)
 
 
-class laplace:
-
-    def logpdf(x, loc, scale):
-        return stats.laplace.logpdf(x, loc, scale).sum()
-
-    def sample(key, loc, scale, shape=()):
-        return scale * jax.random.laplace(key, shape=shape) + loc
-
-    def reparam_sample(key, loc, scale, n_samples):
-        return loc_scale_reparam_sample(standard_samplers["laplace"])(
-            key, loc, scale, n_samples
-        )
+def T(loc: float | ArrayLikeTree = None, scale: float | ArrayLikeTree = None):
+    return construct_loc_scale_functions("t", loc, scale)
 
 
-laplace = loc_scale(laplace, name="laplace")
-
-
-class logistic:
-
-    def logpdf(x, loc, scale): ...
-
-
-logistic = loc_scale(logistic, name="logistic")
-
-
-class student_t:
-
-    def logpdf(x, loc, scale): ...
-
-
-student_t = loc_scale(student_t, name="student_t")
