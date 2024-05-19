@@ -131,6 +131,7 @@ def _step(
     kl_fn: Callable,
     optimizer: GradientTransformation,
     n_samples: int,
+    kl_scale: float,
 ) -> tuple[
     tuple[ArrayLikeTree, ArrayLikeTree, ArrayLikeTree], tuple[float, float, float]
 ]:
@@ -151,16 +152,14 @@ def _step(
         # ----- Compute losses -----
         # KL loss
         kl = kl_fn(z, **z_params)
-        kl = kl.sum()
 
         # x is [batch_size, data_dim]
         # Each x_param is [n_samples, batch_size, ...]
         # Broadcasting will take care of the leading dimension mismatch.
         nll = -obs_logpdf(x, **x_params) / n_samples
-        nll = nll.sum()
 
         # ----- Combine losses -----
-        loss = nll + kl
+        loss = nll + (kl * kl_scale)
         return loss, ((nll, kl), (upd_enc_state, upd_dec_state))
 
     loss_grad_fn = jax.value_and_grad(loss_fn, has_aux=True, argnums=(0, 1))
@@ -190,6 +189,8 @@ def make_step(
     kl_fn: Callable,
     optimizer: GradientTransformation,
     n_samples: int,
+    kl_scale: float,
+    nll_scale: float,
 ) -> Callable[[random.key, AevbState, jnp.array], tuple[AevbState, AevbInfo]]:
 
     # If not analytical KL, need to divide by number of samples afterward
@@ -219,6 +220,7 @@ def make_step(
             _kl_fn,
             optimizer,
             n_samples,
+            kl_scale,
         )
         return AevbState(
             enc_params, enc_state, dec_params, dec_state, opt_state
@@ -294,6 +296,7 @@ class Aevb:
         variational_dist: str | tuple[Callable, Callable],
         optimizer: GradientTransformation,
         n_samples: int,
+        kl_scale: float = 1.0,
     ):
         prior: Prior = cls.convert_prior(prior)
         obs_dist: ObsDist = cls.convert_obs_dist(obs_dist)
@@ -351,6 +354,7 @@ class Aevb:
             kl_fn,
             optimizer,
             n_samples,
+            kl_scale,
         )
 
         return AevbEngine(

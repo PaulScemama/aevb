@@ -58,7 +58,7 @@ decoder = MLP(
     batchnorm_idx=[
         0,
     ],
-    output_heads={"loc": 784, "scale": (784, lambda _: jnp.ones(784) * 0.1)},
+    output_heads={"loc": 784},  # , "scale": (784, lambda _: jnp.ones(784) * 0.1)},
 )
 
 
@@ -74,13 +74,13 @@ def main(save_samples_pth: str):
 
     seed = 1
     n = N_train.item()
-    batch_size = 100
+    batch_size = 256
     batches = data_stream(seed, X_train, batch_size, n)
 
     # Create AEVB inference engine
     latent_dim = 4
     data_dim = 784
-    optimizer = optax.adam(1e-3)
+    optimizer = optax.adam(5e-3)
 
     dec_init, dec_apply = init_apply_eqx_model(
         decoder, batchnorm=True, input_dim=latent_dim
@@ -101,11 +101,12 @@ def main(save_samples_pth: str):
         variational_dist="normal",
         optimizer=optimizer,
         n_samples=5,
+        kl_scale=0.01,
     )
 
     # Run AEVB
     key = random.key(1242)
-    num_steps = 3000
+    num_steps = 5000
     eval_every = 100
 
     aevb_state: AevbState = engine.init(dec_init_args=(), enc_init_args=())

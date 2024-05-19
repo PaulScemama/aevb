@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Callable, Dict, List
 
 import flax.linen as nn
 import jax.numpy as jnp
@@ -52,3 +52,14 @@ class DecMLP(nn.Module):
             x = self.activation(x)
         x = nn.Dense(self.out_dim)
         return x
+
+
+class MLP(nn.Module):
+
+    hidden: List[int]
+    activation: tuple[Callable, List[int]]
+    batchnorm_idx: List[int]
+    output_heads: Dict[str, int | tuple[int, callable]]
+
+    @nn.compact
+    def __call__(self, x, train: bool = False): ...

@@ -30,7 +30,7 @@ def dist_like(dist_fn: callable) -> ArrayTree:
 
 
 def nonstandardize_loc_scale_sample(standard_sampler: callable):
-    def _sample(key, loc, scale, shape=()):
+    def _sample(key, loc=0, scale=1, shape=()):
         return scale * standard_sampler(key, shape=shape) + loc
 
     return _sample
@@ -55,7 +55,7 @@ def loc_scale_rsample(like_sampler: callable):
 
 def nonstandardize_loc_scale_logpdf(standard_logpdf: callable):
 
-    def _logpdf(x, loc, scale):
+    def _logpdf(x, loc=0, scale=1):
         logpdf_elements = jax.tree.map(standard_logpdf, x, loc, scale)  # pytree
         sum_elements = jax.tree.map(jnp.sum, logpdf_elements)  # pytree
         logpdf = jax.tree.reduce(jnp.add, sum_elements)  # float
