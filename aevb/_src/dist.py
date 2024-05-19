@@ -2,6 +2,7 @@ from functools import partial
 from typing import NamedTuple
 
 import jax
+import jax.numpy as jnp
 import jax.random as random
 import jax.scipy.stats as stats
 from jax.tree_util import tree_leaves, tree_structure, tree_unflatten
@@ -52,11 +53,22 @@ def loc_scale_rsample(like_sampler: callable):
     return _loc_scale_rsample
 
 
+def nonstandardize_loc_scale_logpdf(standard_logpdf: callable):
+
+    def _logpdf(x, loc, scale):
+        logpdf_elements = jax.tree.map(standard_logpdf, x, loc, scale)  # pytree
+        sum_elements = jax.tree.map(jnp.sum, logpdf_elements)  # pytree
+        logpdf = jax.tree.reduce(jnp.add, sum_elements)  # float
+        return logpdf
+
+    return _logpdf
+
+
 loc_scale_logpdfs = {
-    "normal": stats.norm.logpdf,
-    "laplace": stats.laplace.logpdf,
-    "logistic": stats.logistic.logpdf,
-    "t": stats.t.logpdf,
+    "normal": nonstandardize_loc_scale_logpdf(stats.norm.logpdf),
+    "laplace": nonstandardize_loc_scale_logpdf(stats.laplace.logpdf),
+    "logistic": nonstandardize_loc_scale_logpdf(stats.logistic.logpdf),
+    "t": nonstandardize_loc_scale_logpdf(stats.t.logpdf),
 }
 
 loc_scale_samplers = {
@@ -74,7 +86,12 @@ rsample_loc_scale_samplers = {
 }
 
 
-def construct_loc_scale_functions(name: str, loc, scale):
+def _partial_but_ignore_none(fn: callable, **kwargs):
+    to_set = {k: v for k, v in kwargs.items() if v is not None}
+    return partial(fn, **to_set)
+
+
+def construct_loc_scale_functions(name: str, loc=None, scale=None):
     out = ()
     fns = (
         loc_scale_logpdfs[name],
@@ -82,13 +99,7 @@ def construct_loc_scale_functions(name: str, loc, scale):
         rsample_loc_scale_samplers[name],
     )
     for fn in fns:
-        if loc:
-            fn = partial(fn, loc=loc)
-        if scale:
-            fn = partial(fn, scale=scale)
-        else:
-            fn = fn
-        out += (fn,)
+        out += (_partial_but_ignore_none(fn, loc=loc, scale=scale),)
     return Dist(name, *out)
 
 
